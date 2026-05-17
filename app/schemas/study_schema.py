@@ -16,6 +16,57 @@ class BaseLLMSchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @staticmethod
+    def _extract_json_candidate(payload: str) -> str | None:
+        """Extract a likely JSON object/array from mixed LLM output text."""
+        text = payload.strip()
+        if not text:
+            return None
+
+        # Prefer fenced code blocks if present.
+        if "```" in text:
+            segments = text.split("```")
+            for segment in segments:
+                candidate = segment.strip()
+                if not candidate:
+                    continue
+                if candidate.startswith("json"):
+                    candidate = candidate[4:].strip()
+                if candidate.startswith("{") or candidate.startswith("["):
+                    return candidate
+
+        # Fallback: find the first balanced JSON object/array in the text.
+        for opener, closer in (("{", "}"), ("[", "]")):
+            start = text.find(opener)
+            if start == -1:
+                continue
+
+            depth = 0
+            in_string = False
+            escape = False
+            for idx in range(start, len(text)):
+                ch = text[idx]
+                if in_string:
+                    if escape:
+                        escape = False
+                    elif ch == "\\":
+                        escape = True
+                    elif ch == '"':
+                        in_string = False
+                    continue
+
+                if ch == '"':
+                    in_string = True
+                    continue
+                if ch == opener:
+                    depth += 1
+                elif ch == closer:
+                    depth -= 1
+                    if depth == 0:
+                        return text[start : idx + 1]
+
+        return None
+
     @classmethod
     def from_llm_json(cls, payload: str) -> "BaseLLMSchema":
         """
@@ -24,10 +75,25 @@ class BaseLLMSchema(BaseModel):
         Raises:
             SchemaValidationError: If JSON is malformed or fails schema validation.
         """
-        try:
-            raw = json.loads(payload)
-        except JSONDecodeError as exc:
-            raise SchemaValidationError(f"Invalid JSON response: {exc.msg} (line {exc.lineno}, column {exc.colno})") from exc
+        raw: Any
+        parse_errors: list[str] = []
+        candidate_texts = [payload]
+
+        extracted = cls._extract_json_candidate(payload)
+        if extracted and extracted != payload:
+            candidate_texts.append(extracted)
+
+        for candidate in candidate_texts:
+            try:
+                raw = json.loads(candidate)
+                break
+            except JSONDecodeError as exc:
+                parse_errors.append(f"{exc.msg} (line {exc.lineno}, column {exc.colno})")
+        else:
+            raise SchemaValidationError(
+                "Invalid JSON response. Parse attempts failed: "
+                + " | ".join(parse_errors)
+            )
 
         try:
             return cls.model_validate(raw)

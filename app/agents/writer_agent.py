@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+from typing import Any
 
 from app.agents.base_agent import AgentExecutionError, BaseAgent
 from app.schemas.agent_output_schema import CritiqueSchema
 from app.schemas.study_schema import StudySchema
 from app.utils.prompt_loader import load_prompt_template
-
-WriterMode = Literal["study_table", "summary", "gaps", "rrl", "full_report"]
-
 
 class WriterAgent(BaseAgent):
     """Generate user-facing markdown from structured study and critique data."""

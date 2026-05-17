@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.agents.base_agent import AgentExecutionError, BaseAgent
@@ -66,20 +67,79 @@ class ResearchReaderAgent(BaseAgent):
         if not normalized:
             return []
 
+        blocks = [block.strip() for block in re.split(r"\n\s*\n+", normalized) if block.strip()]
+        if not blocks:
+            return []
+
         chunks: list[str] = []
-        start = 0
-        text_len = len(normalized)
+        current_parts: list[str] = []
+        current_len = 0
 
-        while start < text_len:
-            end = min(start + self.chunk_size, text_len)
-            piece = normalized[start:end].strip()
-            if piece:
-                chunks.append(piece)
-            if end >= text_len:
-                break
-            start = end - self.chunk_overlap
+        for block in blocks:
+            block_len = len(block)
 
+            if block_len > self.chunk_size:
+                if current_parts:
+                    chunks.append("\n\n".join(current_parts).strip())
+                    current_parts = []
+                    current_len = 0
+                chunks.extend(self._split_oversized_block(block))
+                continue
+
+            join_cost = 2 if current_parts else 0
+            if current_len + join_cost + block_len <= self.chunk_size:
+                current_parts.append(block)
+                current_len += join_cost + block_len
+            else:
+                chunks.append("\n\n".join(current_parts).strip())
+                current_parts = [block]
+                current_len = block_len
+
+        if current_parts:
+            chunks.append("\n\n".join(current_parts).strip())
+
+        if self.chunk_overlap <= 0 or len(chunks) <= 1:
+            return chunks
+
+        overlapped: list[str] = [chunks[0]]
+        for idx in range(1, len(chunks)):
+            overlap_tail = chunks[idx - 1][-self.chunk_overlap :].strip()
+            if overlap_tail:
+                overlapped.append(f"{overlap_tail}\n\n{chunks[idx]}")
+            else:
+                overlapped.append(chunks[idx])
+
+        return overlapped
+
+    def _split_oversized_block(self, block: str) -> list[str]:
+        """Split large blocks by sentence boundaries before hard slicing."""
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", block) if s.strip()]
+        if len(sentences) <= 1:
+            return self._hard_split(block)
+
+        chunks: list[str] = []
+        current = ""
+        for sentence in sentences:
+            if len(sentence) > self.chunk_size:
+                if current:
+                    chunks.append(current.strip())
+                    current = ""
+                chunks.extend(self._hard_split(sentence))
+                continue
+
+            candidate = f"{current} {sentence}".strip() if current else sentence
+            if len(candidate) <= self.chunk_size:
+                current = candidate
+            else:
+                chunks.append(current.strip())
+                current = sentence
+
+        if current:
+            chunks.append(current.strip())
         return chunks
+
+    def _hard_split(self, text: str) -> list[str]:
+        return [text[i : i + self.chunk_size].strip() for i in range(0, len(text), self.chunk_size) if text[i : i + self.chunk_size].strip()]
 
     def run(self, provider: str | None = None, task_type: str | None = None, **kwargs: Any) -> StudySchema:
         paper_text = str(kwargs.get("paper_text", "")).strip()

@@ -50,7 +50,7 @@ pip install -r requirements.txt
 ```
 
 ## Next Steps
-- implement orchestrator flow in `app/orchestrator/`
-- add agent implementations in `app/agents/`
-- add model/provider adapters in `app/llm/`
-- expand tests for orchestration and tool behavior
+- implement end-to-end orchestrator flow in `app/orchestrator/` to wire reader -> critic -> writer
+- add automated tests for agent prompt building, schema parsing, and orchestration behavior
+- add integration tests with mocked LLM providers to validate pipeline outputs
+- expose a CLI/API workflow for running the multi-agent pipeline from a research input
