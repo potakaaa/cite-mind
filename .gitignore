@@ -34,5 +34,7 @@ htmlcov/
 # Project data
 /data/uploads/*
 /data/outputs/*
+/data/extracted_text/*
 !/data/uploads/.gitkeep
 !/data/outputs/.gitkeep
+!/data/extracted_text/.gitkeep
