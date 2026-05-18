@@ -36,6 +36,8 @@ class Settings(BaseModel):
     # Ollama (local/free default)
     ollama_base_url: str = Field(default=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
     ollama_model: str = Field(default=os.getenv("OLLAMA_MODEL", "llama3.1:8b"))
+    ollama_timeout_seconds: int = Field(default=int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120")), ge=1)
+    ollama_retries: int = Field(default=int(os.getenv("OLLAMA_RETRIES", "0")), ge=0)
 
     # OpenRouter
     openrouter_api_key: str | None = Field(default=os.getenv("OPENROUTER_API_KEY"))

@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from html import escape
+import re
 from typing import Any
 
 import streamlit as st
 
 from config import settings
 from app.llm import LLMRouter
+from app.llm import LLMProviderError
 from app.orchestrator.task_schema import TaskType
 from app.services.document_service import DocumentService, DocumentServiceError
 from app.services.export_service import ExportService, ExportServiceError
 from app.services.research_service import ResearchService, ResearchServiceError
+from app.tools.citation_lookup import CitationLookup, CitationLookupError, PaperSearchResult
 
 
 TASK_OPTIONS: list[tuple[str, TaskType]] = [
@@ -33,10 +37,101 @@ def _show_error(message: str) -> None:
     # Avoid Streamlit alert emoji parsing path, which can fail with OSError on some environments.
     st.markdown(
         "<div style='padding:0.75rem;border-radius:0.5rem;background:#4b1f1f;color:#ffd8d8'>"
-        + message
+        + escape(message)
         + "</div>",
         unsafe_allow_html=True,
     )
+
+
+def _is_paper_search_request(message: str) -> bool:
+    text = message.lower()
+    asks_for_search = any(token in text for token in ("search", "find", "look for", "existing papers", "studies"))
+    scholarly_target = any(token in text for token in ("paper", "papers", "study", "studies", "literature", "methodolog"))
+    return asks_for_search and scholarly_target
+
+
+def _paper_search_query(message: str) -> str:
+    query = re.sub(
+        r"\b(can you|could you|please|search|find|look for|existing|papers?|studies|and|their|methodolog(?:y|ies)|about|on|for)\b",
+        " ",
+        message,
+        flags=re.IGNORECASE,
+    )
+    query = re.sub(r"[^A-Za-z0-9\s:/().,-]", " ", query)
+    query = re.sub(r"\s+", " ", query).strip(" ?.,")
+    return query or message.strip()
+
+
+def _format_paper_results(results: list[PaperSearchResult]) -> str:
+    lines = ["### Existing papers found"]
+    for index, paper in enumerate(results, start=1):
+        authors = ", ".join(paper.authors[:3])
+        if len(paper.authors) > 3:
+            authors += " et al."
+        details = " | ".join(
+            part
+            for part in [
+                str(paper.year) if paper.year else None,
+                authors or None,
+                paper.venue,
+                f"DOI: {paper.doi}" if paper.doi else None,
+            ]
+            if part
+        )
+        lines.append(f"{index}. **{paper.title}**")
+        if details:
+            lines.append(f"   {details}")
+        if paper.url:
+            lines.append(f"   {paper.url}")
+        if paper.abstract:
+            abstract = paper.abstract.strip()
+            if len(abstract) > 500:
+                abstract = abstract[:497].rstrip() + "..."
+            lines.append(f"   Abstract: {abstract}")
+            methodology = _methodology_clue(abstract)
+            if methodology:
+                lines.append(f"   Methodology clue: {methodology}")
+        else:
+            lines.append("   Methodology clue: Not available in the search metadata; check the full text.")
+    return "\n".join(lines)
+
+
+def _methodology_clue(text: str) -> str | None:
+    keywords = (
+        "method",
+        "model",
+        "survey",
+        "interview",
+        "case study",
+        "optimization",
+        "algorithm",
+        "simulation",
+        "regression",
+        "analysis",
+        "framework",
+        "experiment",
+        "data",
+    )
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    for sentence in sentences:
+        if any(keyword in sentence.lower() for keyword in keywords):
+            clue = sentence.strip()
+            return clue[:297].rstrip() + "..." if len(clue) > 300 else clue
+    return None
+
+
+def _format_llm_failure(provider: str | None, exc: Exception) -> str:
+    selected = provider or settings.default_llm_provider
+    if selected == "ollama":
+        return (
+            "The paper search completed, but Ollama did not answer before the timeout. "
+            "Make sure Ollama is running, the selected model is pulled, or raise "
+            "OLLAMA_TIMEOUT_SECONDS in .env for slower local models.\n\n"
+            f"Provider error: {exc}"
+        )
+    if isinstance(exc, LLMProviderError):
+        return f"The paper search completed, but the {selected} LLM call failed: {exc}"
+    return f"Chat failed: {type(exc).__name__}: {exc}"
 
 
 def _configured_providers() -> list[str]:
@@ -279,10 +374,35 @@ def _render_chat_tab(provider_selection: str | None) -> None:
     if context_block:
         context_block = context_block[:12000]
 
+    search_results_markdown = ""
+    if _is_paper_search_request(user_message):
+        try:
+            with st.spinner("Searching scholarly indexes..."):
+                search_results = CitationLookup(timeout_seconds=10.0).search_papers(
+                    _paper_search_query(user_message),
+                    limit=5,
+                )
+            search_results_markdown = _format_paper_results(search_results)
+        except CitationLookupError as exc:
+            _show_error(f"Paper search failed: {exc}")
+            return
+        except Exception as exc:  # pragma: no cover
+            _show_error(f"Paper search failed: {type(exc).__name__}: {exc}")
+            return
+
+        with st.chat_message("assistant"):
+            st.markdown(search_results_markdown)
+        st.session_state.chat_messages.append({"role": "assistant", "content": search_results_markdown})
+        return
+
     prompt = (
         f"{CHAT_SYSTEM_PROMPT}\n\n"
+        "When scholarly search results are provided, use only those results as found papers. "
+        "Do not invent paper titles, authors, quotes, links, or methodologies. If methodology details are "
+        "not visible in the title or abstract, say that the full text must be checked.\n\n"
         f"Conversation so far:\n{chr(10).join(history_lines)}\n\n"
         f"Document context (may be empty):\n{context_block}\n\n"
+        f"Scholarly search results (may be empty):\n{search_results_markdown}\n\n"
         f"Now answer the latest user message thoroughly and practically."
     )
 
@@ -291,8 +411,15 @@ def _render_chat_tab(provider_selection: str | None) -> None:
             try:
                 answer = llm.generate(prompt=prompt, provider=provider_selection)
             except Exception as exc:
-                _show_error(f"Chat failed: {type(exc).__name__}: {exc}")
-                return
+                if search_results_markdown:
+                    answer = (
+                        search_results_markdown
+                        + "\n\n"
+                        + _format_llm_failure(provider_selection, exc)
+                    )
+                else:
+                    _show_error(_format_llm_failure(provider_selection, exc))
+                    return
         st.markdown(answer)
 
     st.session_state.chat_messages.append({"role": "assistant", "content": answer})

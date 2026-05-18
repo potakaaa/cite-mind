@@ -1,7 +1,7 @@
 """Tools package for ingestion and preprocessing."""
 
 from .file_manager import FileManager, FileValidationError
-from .citation_lookup import CitationLookup, CitationLookupError, CitationMetadata
+from .citation_lookup import CitationLookup, CitationLookupError, CitationMetadata, PaperSearchResult
 from .pdf_reader import PDFReadError, PDFReader
 from .text_chunker import TextChunk, TextChunker
 
@@ -11,6 +11,7 @@ __all__ = [
     "CitationLookup",
     "CitationLookupError",
     "CitationMetadata",
+    "PaperSearchResult",
     "PDFReader",
     "PDFReadError",
     "TextChunker",

@@ -10,7 +10,9 @@ from .base_provider import BaseLLMProvider, LLMProviderError
 
 
 class OllamaProvider(BaseLLMProvider):
-    def __init__(self, timeout: int = 60, retries: int = 2) -> None:
+    def __init__(self, timeout: int | None = None, retries: int | None = None) -> None:
+        timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
+        retries = retries if retries is not None else settings.ollama_retries
         super().__init__(provider_name="ollama", timeout=timeout, retries=retries)
 
     def generate(self, prompt: str, **kwargs: Any) -> str:

@@ -48,6 +48,30 @@ class CitationMetadata:
         }
 
 
+@dataclass
+class PaperSearchResult:
+    title: str
+    authors: list[str] = field(default_factory=list)
+    year: int | None = None
+    doi: str | None = None
+    venue: str | None = None
+    url: str | None = None
+    abstract: str | None = None
+    source: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "title": self.title,
+            "authors": list(self.authors),
+            "year": self.year,
+            "doi": self.doi,
+            "venue": self.venue,
+            "url": self.url,
+            "abstract": self.abstract,
+            "source": self.source,
+        }
+
+
 class CitationLookup:
     """Lookup citation metadata from free APIs."""
 
@@ -106,6 +130,122 @@ class CitationLookup:
         raise CitationLookupError(
             "Title lookup failed across providers. " + "; ".join(errors or ["No provider result"])
         )
+
+    def search_papers(self, query: str, *, limit: int = 5) -> list[PaperSearchResult]:
+        normalized = query.strip()
+        if not normalized:
+            raise CitationLookupError("Search query cannot be empty.")
+
+        errors: list[str] = []
+        results = self._search_openalex(normalized, limit=limit, errors=errors)
+        if results:
+            return results
+
+        results = self._search_semantic_scholar(normalized, limit=limit, errors=errors)
+        if results:
+            return results
+
+        raise CitationLookupError(
+            "Paper search failed across providers. " + "; ".join(errors or ["No provider result"])
+        )
+
+    def _search_openalex(
+        self, query: str, *, limit: int, errors: list[str]
+    ) -> list[PaperSearchResult]:
+        try:
+            response = requests.get(
+                "https://api.openalex.org/works",
+                params={
+                    "search": query,
+                    "per-page": max(1, min(limit, 10)),
+                    "select": (
+                        "display_name,publication_year,doi,authorships,primary_location,"
+                        "id,abstract_inverted_index"
+                    ),
+                },
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            errors.append(f"openalex: {exc}")
+            return []
+
+        papers = []
+        for item in payload.get("results", []) or []:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("display_name") or "").strip()
+            if not title:
+                continue
+            papers.append(
+                PaperSearchResult(
+                    title=title,
+                    authors=[
+                        str(author.get("author", {}).get("display_name", "")).strip()
+                        for author in (item.get("authorships", []) or [])
+                        if str(author.get("author", {}).get("display_name", "")).strip()
+                    ],
+                    year=item.get("publication_year"),
+                    doi=self._normalize_openalex_doi(item.get("doi")),
+                    venue=self._openalex_venue(item),
+                    url=item.get("id"),
+                    abstract=self._abstract_from_openalex_index(item.get("abstract_inverted_index")),
+                    source="openalex_search",
+                )
+            )
+        if not papers:
+            errors.append("openalex: no match")
+        return papers
+
+    def _search_semantic_scholar(
+        self, query: str, *, limit: int, errors: list[str]
+    ) -> list[PaperSearchResult]:
+        try:
+            response = requests.get(
+                "https://api.semanticscholar.org/graph/v1/paper/search",
+                params={
+                    "query": query,
+                    "limit": max(1, min(limit, 10)),
+                    "fields": "title,authors,year,externalIds,venue,url,abstract",
+                },
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            errors.append(f"semantic_scholar: {exc}")
+            return []
+
+        papers = []
+        for item in payload.get("data", []) or []:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            external_ids = item.get("externalIds")
+            if not isinstance(external_ids, dict):
+                external_ids = {}
+            papers.append(
+                PaperSearchResult(
+                    title=title,
+                    authors=[
+                        str(author.get("name", "")).strip()
+                        for author in (item.get("authors", []) or [])
+                        if str(author.get("name", "")).strip()
+                    ],
+                    year=item.get("year"),
+                    doi=external_ids.get("DOI"),
+                    venue=item.get("venue"),
+                    url=item.get("url"),
+                    abstract=item.get("abstract"),
+                    source="semantic_scholar_search",
+                )
+            )
+        if not papers:
+            errors.append("semantic_scholar: no match")
+        return papers
 
     def _lookup_by_title_crossref(self, title: str, errors: list[str]) -> CitationMetadata | None:
         try:
@@ -203,8 +343,6 @@ class CitationLookup:
         )
 
     def _normalize_openalex(self, item: dict[str, Any], source: str) -> CitationMetadata:
-        doi_url = str(item.get("doi", "")).strip()
-        doi = doi_url.split("doi.org/")[-1] if "doi.org/" in doi_url.lower() else doi_url or None
         authors = [
             str(author.get("author", {}).get("display_name", "")).strip()
             for author in (item.get("authorships", []) or [])
@@ -215,8 +353,8 @@ class CitationLookup:
             title=item.get("display_name"),
             authors=authors,
             year=item.get("publication_year"),
-            doi=doi,
-            journal=(item.get("primary_location", {}) or {}).get("source", {}).get("display_name"),
+            doi=self._normalize_openalex_doi(item.get("doi")),
+            journal=self._openalex_venue(item),
             pages=None,
             url=item.get("id"),
             source=source,
@@ -250,3 +388,31 @@ class CitationLookup:
         }
         metadata.incomplete_fields = [key for key, value in required.items() if not value]
         return metadata
+
+    def _normalize_openalex_doi(self, value: Any) -> str | None:
+        doi_url = str(value or "").strip()
+        return doi_url.split("doi.org/")[-1] if "doi.org/" in doi_url.lower() else doi_url or None
+
+    def _openalex_venue(self, item: dict[str, Any]) -> str | None:
+        primary_location = item.get("primary_location")
+        if not isinstance(primary_location, dict):
+            return None
+        source = primary_location.get("source")
+        if not isinstance(source, dict):
+            return None
+        venue = source.get("display_name")
+        return str(venue).strip() if venue else None
+
+    def _abstract_from_openalex_index(self, index: Any) -> str | None:
+        if not isinstance(index, dict) or not index:
+            return None
+        positioned_words: list[tuple[int, str]] = []
+        for word, positions in index.items():
+            if not isinstance(positions, list):
+                continue
+            for position in positions:
+                if isinstance(position, int):
+                    positioned_words.append((position, str(word)))
+        if not positioned_words:
+            return None
+        return " ".join(word for _, word in sorted(positioned_words)).strip() or None
