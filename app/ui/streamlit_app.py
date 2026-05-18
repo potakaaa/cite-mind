@@ -10,6 +10,7 @@ from config import settings
 from app.llm import LLMRouter
 from app.orchestrator.task_schema import TaskType
 from app.services.document_service import DocumentService, DocumentServiceError
+from app.services.export_service import ExportService, ExportServiceError
 from app.services.research_service import ResearchService, ResearchServiceError
 
 
@@ -26,6 +27,16 @@ CHAT_SYSTEM_PROMPT = (
     "search terms, evaluation designs, and pitfalls. Be explicit when you are unsure. "
     "If document context is provided, prioritize it and quote short snippets where helpful."
 )
+
+
+def _show_error(message: str) -> None:
+    # Avoid Streamlit alert emoji parsing path, which can fail with OSError on some environments.
+    st.markdown(
+        "<div style='padding:0.75rem;border-radius:0.5rem;background:#4b1f1f;color:#ffd8d8'>"
+        + message
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _configured_providers() -> list[str]:
@@ -68,6 +79,51 @@ def _run_workflow(
     return result
 
 
+def _export_title_from_result(result: dict[str, Any]) -> str | None:
+    metadata = result.get("metadata", {})
+    if not isinstance(metadata, dict):
+        return None
+
+    document = metadata.get("document")
+    if isinstance(document, dict):
+        source_file = document.get("source_file")
+        if isinstance(source_file, str) and source_file.strip():
+            return source_file
+    return None
+
+
+def _render_export_buttons(result: dict[str, Any], task_type: TaskType) -> None:
+    final_output = str(result.get("final_output", "")).strip()
+    if not final_output:
+        return
+
+    try:
+        exported_files = ExportService().export_all(
+            content=final_output,
+            task_type=task_type,
+            title=_export_title_from_result(result),
+            metadata=result.get("metadata") if isinstance(result.get("metadata"), dict) else None,
+        )
+    except ExportServiceError as exc:
+        _show_error(f"Export failed: {exc}")
+        return
+
+    st.caption("Exports are saved under data/outputs/.")
+    columns = st.columns(3)
+    labels = {"md": "Download Markdown", "docx": "Download DOCX", "pdf": "Download PDF"}
+    for column, extension in zip(columns, ("md", "docx", "pdf"), strict=True):
+        exported = exported_files[extension]
+        with column:
+            st.download_button(
+                labels[extension],
+                data=exported.path.read_bytes(),
+                file_name=exported.filename,
+                mime=exported.mime_type,
+                use_container_width=True,
+                key=f"pipeline_download_{extension}",
+            )
+
+
 def _ingest_document_context(
     *,
     source_type: str,
@@ -95,6 +151,11 @@ def _ingest_document_context(
 
 def _render_pipeline_tab(provider_selection: str | None) -> None:
     service = ResearchService()
+    if "pipeline_result" not in st.session_state:
+        st.session_state.pipeline_result = None
+    if "pipeline_task_type" not in st.session_state:
+        st.session_state.pipeline_task_type = None
+
     source_type = st.radio("Input source", options=["Upload PDF", "Paste text"], horizontal=True, key="pipeline_source")
 
     uploaded_pdf = None
@@ -109,48 +170,54 @@ def _render_pipeline_tab(provider_selection: str | None) -> None:
     task_type = next(task for label, task in TASK_OPTIONS if label == task_label)
 
     run_clicked = st.button("Run workflow", type="primary", use_container_width=True, key="pipeline_run")
-    if not run_clicked:
+    if run_clicked:
+        try:
+            if source_type == "Upload PDF":
+                if uploaded_pdf is None:
+                    _show_error("Please upload a PDF file.")
+                    return
+                pdf_bytes = uploaded_pdf.read()
+                if not pdf_bytes:
+                    _show_error("Uploaded PDF is empty.")
+                    return
+                raw_text_input = None
+                pdf_filename = uploaded_pdf.name
+            else:
+                if not pasted_text.strip():
+                    _show_error("Please paste text input.")
+                    return
+                raw_text_input = pasted_text
+                pdf_bytes = None
+                pdf_filename = None
+
+            with st.spinner("Running research workflow..."):
+                result = _run_workflow(
+                    service=service,
+                    task_type=task_type,
+                    provider=provider_selection,
+                    raw_text=raw_text_input,
+                    pdf_bytes=pdf_bytes,
+                    pdf_filename=pdf_filename,
+                )
+            st.session_state.pipeline_result = result
+            st.session_state.pipeline_task_type = task_type.value
+
+        except ResearchServiceError as exc:
+            _show_error(f"Workflow failed: {exc}")
+        except Exception as exc:  # pragma: no cover - UI safety net
+            _show_error(f"Unexpected error: {exc}")
+
+    current_result = st.session_state.pipeline_result
+    current_task_type = st.session_state.pipeline_task_type
+    if not isinstance(current_result, dict) or not current_task_type:
         return
 
-    try:
-        if source_type == "Upload PDF":
-            if uploaded_pdf is None:
-                st.error("Please upload a PDF file.")
-                return
-            pdf_bytes = uploaded_pdf.read()
-            if not pdf_bytes:
-                st.error("Uploaded PDF is empty.")
-                return
-            raw_text_input = None
-            pdf_filename = uploaded_pdf.name
-        else:
-            if not pasted_text.strip():
-                st.error("Please paste text input.")
-                return
-            raw_text_input = pasted_text
-            pdf_bytes = None
-            pdf_filename = None
+    st.subheader("Final output")
+    st.markdown(current_result.get("final_output", ""))
+    _render_export_buttons(current_result, TaskType(current_task_type))
 
-        with st.spinner("Running research workflow..."):
-            result = _run_workflow(
-                service=service,
-                task_type=task_type,
-                provider=provider_selection,
-                raw_text=raw_text_input,
-                pdf_bytes=pdf_bytes,
-                pdf_filename=pdf_filename,
-            )
-
-        st.subheader("Final output")
-        st.markdown(result.get("final_output", ""))
-
-        with st.expander("Debug metadata", expanded=False):
-            st.json(result.get("metadata", {}))
-
-    except ResearchServiceError as exc:
-        st.error(f"Workflow failed: {exc}")
-    except Exception as exc:  # pragma: no cover - UI safety net
-        st.error(f"Unexpected error: {exc}")
+    with st.expander("Debug metadata", expanded=False):
+        st.json(current_result.get("metadata", {}))
 
 
 def _render_chat_tab(provider_selection: str | None) -> None:
@@ -184,9 +251,9 @@ def _render_chat_tab(provider_selection: str | None) -> None:
                     )
                 st.success("Context loaded for chat.")
         except DocumentServiceError as exc:
-            st.error(str(exc))
+            _show_error(str(exc))
         except Exception as exc:  # pragma: no cover
-            st.error(f"Failed to prepare context: {exc}")
+            _show_error(f"Failed to prepare context: {exc}")
 
     if st.session_state.chat_context:
         st.info("Document context is active for chat.")
@@ -224,7 +291,7 @@ def _render_chat_tab(provider_selection: str | None) -> None:
             try:
                 answer = llm.generate(prompt=prompt, provider=provider_selection)
             except Exception as exc:
-                st.error(f"Chat failed: {exc}")
+                _show_error(f"Chat failed: {type(exc).__name__}: {exc}")
                 return
         st.markdown(answer)
 
