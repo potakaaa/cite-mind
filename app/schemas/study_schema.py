@@ -4,7 +4,7 @@ import json
 from json import JSONDecodeError
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 
 class SchemaValidationError(ValueError):
@@ -126,3 +126,50 @@ class StudySchema(BaseLLMSchema):
     conclusion: str | None = Field(default=None)
     limitations: list[str] = Field(default_factory=list)
     source_notes: list[str] = Field(default_factory=list)
+
+    @field_validator(
+        "title",
+        "abstract",
+        "objective",
+        "methodology",
+        "dataset_or_participants",
+        "conclusion",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_scalar_text(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return cleaned or None
+        if isinstance(value, list):
+            text_parts = [str(v).strip() for v in value if str(v).strip()]
+            return " ".join(text_parts) or None
+        return str(value).strip() or None
+
+    @field_validator("authors", "findings", "limitations", "source_notes", mode="before")
+    @classmethod
+    def _coerce_text_list(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            cleaned = value.strip()
+            return [cleaned] if cleaned else []
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if str(v).strip()]
+        cleaned = str(value).strip()
+        return [cleaned] if cleaned else []
+
+    @field_validator("year", mode="before")
+    @classmethod
+    def _coerce_year(cls, value: Any) -> int | None:
+        if value is None or value == "":
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            digits = "".join(ch for ch in value if ch.isdigit())
+            if len(digits) >= 4:
+                return int(digits[:4])
+        return None
