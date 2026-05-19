@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import time
 from typing import Any
+
+import requests
 
 from config import settings
 
@@ -26,13 +30,54 @@ class OllamaProvider(BaseLLMProvider):
         payload = {
             "model": model,
             "prompt": prompt,
-            "stream": False,
+            "stream": True,
             "options": {"temperature": temperature},
         }
 
-        data = self._post_json(url=url, payload=payload)
-        text = data.get("response")
-        if text is None:
-            raise LLMProviderError(f"Ollama returned no 'response' field: {data}")
+        text = self._stream_generate(url=url, payload=payload)
+        if not text:
+            raise LLMProviderError("Ollama returned an empty response.")
 
         return self._normalize_text(text)
+
+    def _stream_generate(self, url: str, payload: dict[str, Any]) -> str:
+        """Call Ollama in streaming mode to avoid idle read timeouts on slow local models."""
+        last_error: Exception | None = None
+        for attempt in range(self.retries + 1):
+            try:
+                response = requests.post(
+                    url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=self.timeout,
+                    stream=True,
+                )
+                response.raise_for_status()
+
+                chunks: list[str] = []
+                for line in response.iter_lines(decode_unicode=True):
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except ValueError as exc:
+                        raise LLMProviderError(f"Ollama returned invalid streaming JSON: {line}") from exc
+
+                    if "error" in data:
+                        raise LLMProviderError(f"Ollama returned an error: {data['error']}")
+                    chunk = data.get("response")
+                    if chunk is not None:
+                        chunks.append(str(chunk))
+                    if data.get("done"):
+                        break
+
+                return "".join(chunks)
+            except (requests.Timeout, requests.ConnectionError, requests.HTTPError, LLMProviderError) as exc:
+                last_error = exc
+                if attempt >= self.retries:
+                    break
+                time.sleep(0.5 * (attempt + 1))
+
+        raise LLMProviderError(
+            f"{self.provider_name} request failed after {self.retries + 1} attempts: {last_error}"
+        )
