@@ -58,3 +58,10 @@ def test_llm_router_wraps_unexpected_provider_errors_but_preserves_provider_erro
     router.providers["ollama"] = FakeProvider(error=LLMProviderError("provider failed"))
     with pytest.raises(LLMProviderError, match="provider failed"):
         router.generate("prompt", provider="ollama")
+
+
+def test_llm_router_rejects_unknown_provider():
+    router = build_router()
+
+    with pytest.raises(LLMProviderError, match="Unknown LLM provider"):
+        router.generate("prompt", provider="missing")  # type: ignore[arg-type]

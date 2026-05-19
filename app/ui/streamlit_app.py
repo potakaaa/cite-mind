@@ -12,10 +12,16 @@ from config import settings
 from app.llm import LLMRouter
 from app.llm import LLMProviderError
 from app.orchestrator.task_schema import TaskType
+from app.rag import RAGDisabledError, RAGPipeline
 from app.services.document_service import DocumentService, DocumentServiceError
 from app.services.export_service import ExportService, ExportServiceError
 from app.services.research_service import ResearchService, ResearchServiceError
 from app.tools.citation_lookup import CitationLookup, CitationLookupError, PaperSearchResult
+from app.utils.logging import configure_logging, get_logger, log_failure
+
+
+configure_logging()
+logger = get_logger("app.ui.streamlit")
 
 
 TASK_OPTIONS: list[tuple[str, TaskType]] = [
@@ -41,6 +47,23 @@ def _show_error(message: str) -> None:
         + "</div>",
         unsafe_allow_html=True,
     )
+
+
+def _friendly_error(exc: Exception, default: str = "The request could not be completed.") -> str:
+    detail = str(exc).strip()
+    if not detail:
+        return default
+    if isinstance(exc, ResearchServiceError):
+        return detail
+    if isinstance(exc, DocumentServiceError):
+        return detail
+    if isinstance(exc, LLMProviderError):
+        return (
+            "The selected LLM provider could not complete the request. "
+            "Check the provider settings and local service status, then try again.\n\n"
+            f"Details: {detail}"
+        )
+    return f"{default} Details: {detail}"
 
 
 def _is_paper_search_request(message: str) -> bool:
@@ -135,15 +158,7 @@ def _format_llm_failure(provider: str | None, exc: Exception) -> str:
 
 
 def _configured_providers() -> list[str]:
-    providers = ["ollama", "gemini", "openrouter"]
-    configured: list[str] = []
-    for provider in providers:
-        try:
-            settings.validate_provider_config(provider=provider)  # type: ignore[arg-type]
-            configured.append(provider)
-        except ValueError:
-            continue
-    return configured
+    return list(LLMRouter().configured_providers())
 
 
 def _provider_label(provider: str) -> str:
@@ -298,9 +313,11 @@ def _render_pipeline_tab(provider_selection: str | None) -> None:
             st.session_state.pipeline_task_type = task_type.value
 
         except ResearchServiceError as exc:
-            _show_error(f"Workflow failed: {exc}")
+            log_failure(logger, "pipeline_workflow", exc, task_type=task_type.value, provider=provider_selection)
+            _show_error(f"Workflow failed: {_friendly_error(exc)}")
         except Exception as exc:  # pragma: no cover - UI safety net
-            _show_error(f"Unexpected error: {exc}")
+            log_failure(logger, "pipeline_unexpected", exc, task_type=task_type.value, provider=provider_selection)
+            _show_error(_friendly_error(exc, default="Workflow failed unexpectedly."))
 
     current_result = st.session_state.pipeline_result
     current_task_type = st.session_state.pipeline_task_type
@@ -346,9 +363,11 @@ def _render_chat_tab(provider_selection: str | None) -> None:
                     )
                 st.success("Context loaded for chat.")
         except DocumentServiceError as exc:
-            _show_error(str(exc))
+            log_failure(logger, "chat_context_document", exc)
+            _show_error(_friendly_error(exc))
         except Exception as exc:  # pragma: no cover
-            _show_error(f"Failed to prepare context: {exc}")
+            log_failure(logger, "chat_context_unexpected", exc)
+            _show_error(_friendly_error(exc, default="Failed to prepare context."))
 
     if st.session_state.chat_context:
         st.info("Document context is active for chat.")
@@ -384,10 +403,12 @@ def _render_chat_tab(provider_selection: str | None) -> None:
                 )
             search_results_markdown = _format_paper_results(search_results)
         except CitationLookupError as exc:
-            _show_error(f"Paper search failed: {exc}")
+            log_failure(logger, "paper_search", exc)
+            _show_error(f"Paper search failed: {_friendly_error(exc)}")
             return
         except Exception as exc:  # pragma: no cover
-            _show_error(f"Paper search failed: {type(exc).__name__}: {exc}")
+            log_failure(logger, "paper_search_unexpected", exc)
+            _show_error(_friendly_error(exc, default="Paper search failed."))
             return
 
         with st.chat_message("assistant"):
@@ -411,6 +432,7 @@ def _render_chat_tab(provider_selection: str | None) -> None:
             try:
                 answer = llm.generate(prompt=prompt, provider=provider_selection)
             except Exception as exc:
+                log_failure(logger, "chat_llm", exc, provider=provider_selection)
                 if search_results_markdown:
                     answer = (
                         search_results_markdown
@@ -418,11 +440,143 @@ def _render_chat_tab(provider_selection: str | None) -> None:
                         + _format_llm_failure(provider_selection, exc)
                     )
                 else:
-                    _show_error(_format_llm_failure(provider_selection, exc))
+                    _show_error(_friendly_error(exc, default=_format_llm_failure(provider_selection, exc)))
                     return
         st.markdown(answer)
 
     st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+
+
+def _render_rag_tab(provider_selection: str | None) -> None:
+    if "rag_sources" not in st.session_state:
+        st.session_state.rag_sources = []
+    if "rag_answer" not in st.session_state:
+        st.session_state.rag_answer = None
+
+    st.caption("Optional later-stage workflow for asking questions across indexed paper chunks.")
+    rag_enabled = st.checkbox("Enable cross-paper RAG", value=settings.rag_enabled, key="rag_enabled")
+    pipeline = RAGPipeline(enabled=rag_enabled)
+
+    columns = st.columns([2, 1])
+    with columns[0]:
+        uploaded_pdfs = st.file_uploader(
+            "PDF papers",
+            type=["pdf"],
+            accept_multiple_files=True,
+            key="rag_pdfs",
+        )
+        pasted_texts = st.text_area(
+            "Additional pasted papers",
+            height=180,
+            placeholder="Paste one or more papers. Separate multiple pasted papers with a line containing ---.",
+            key="rag_texts",
+        )
+    with columns[1]:
+        top_k = st.number_input(
+            "Retrieved chunks",
+            min_value=1,
+            max_value=20,
+            value=settings.rag_top_k,
+            step=1,
+            key="rag_top_k",
+        )
+        if st.button("Clear vector store", key="rag_clear", use_container_width=True):
+            try:
+                pipeline.clear()
+                st.session_state.rag_sources = []
+                st.session_state.rag_answer = None
+                st.success("RAG vector store cleared.")
+            except Exception as exc:  # pragma: no cover - UI safety net
+                log_failure(logger, "rag_clear", exc)
+                _show_error(_friendly_error(exc, default="Failed to clear the vector store."))
+
+    if st.button("Index papers", type="primary", key="rag_index", use_container_width=True):
+        try:
+            documents: list[dict[str, Any]] = []
+            for uploaded_pdf in uploaded_pdfs or []:
+                pdf_bytes = uploaded_pdf.read()
+                if pdf_bytes:
+                    documents.append(
+                        {
+                            "paper_id": uploaded_pdf.name,
+                            "pdf_bytes": pdf_bytes,
+                            "pdf_filename": uploaded_pdf.name,
+                        }
+                    )
+
+            for index, raw_text in enumerate(_split_pasted_papers(pasted_texts), start=1):
+                documents.append(
+                    {
+                        "paper_id": f"pasted-paper-{index}",
+                        "raw_text": raw_text,
+                        "metadata": {"source_file": f"pasted-paper-{index}.txt"},
+                    }
+                )
+
+            if not documents:
+                _show_error("Upload at least one PDF or paste paper text to index.")
+                return
+
+            with st.spinner("Indexing paper chunks..."):
+                summaries = pipeline.ingest_documents(documents)
+            st.session_state.rag_sources = summaries
+            st.success(f"Indexed {len(summaries)} paper source(s).")
+        except RAGDisabledError as exc:
+            _show_error(str(exc))
+        except DocumentServiceError as exc:
+            log_failure(logger, "rag_document", exc)
+            _show_error(_friendly_error(exc))
+        except Exception as exc:  # pragma: no cover - UI safety net
+            log_failure(logger, "rag_index_unexpected", exc)
+            _show_error(_friendly_error(exc, default="Failed to index papers."))
+
+    if st.session_state.rag_sources:
+        st.subheader("Indexed sources")
+        st.dataframe(st.session_state.rag_sources, use_container_width=True, hide_index=True)
+
+    question = st.text_input("Question across indexed papers", key="rag_question")
+    if st.button("Ask across papers", key="rag_ask", use_container_width=True):
+        if not question.strip():
+            _show_error("Enter a question before asking across papers.")
+            return
+        try:
+            with st.spinner("Retrieving relevant chunks and answering..."):
+                st.session_state.rag_answer = pipeline.ask(
+                    question,
+                    provider=provider_selection,
+                    top_k=int(top_k),
+                )
+        except RAGDisabledError as exc:
+            _show_error(str(exc))
+        except Exception as exc:  # pragma: no cover - UI safety net
+            log_failure(logger, "rag_ask_unexpected", exc, provider=provider_selection)
+            _show_error(_friendly_error(exc, default="RAG question answering failed."))
+
+    result = st.session_state.rag_answer
+    if not isinstance(result, dict):
+        return
+
+    st.subheader("Answer")
+    st.markdown(str(result.get("answer", "")))
+
+    sources = result.get("sources")
+    if isinstance(sources, list) and sources:
+        with st.expander("Retrieved source chunks", expanded=True):
+            for index, source in enumerate(sources, start=1):
+                metadata = source.get("metadata", {}) if isinstance(source, dict) else {}
+                st.markdown(
+                    f"**[{index}] {metadata.get('source_file', 'unknown source')}** "
+                    f"page {metadata.get('page_start', 'n/a')} | "
+                    f"chunk {metadata.get('chunk_id', 'n/a')} | "
+                    f"score {float(source.get('score', 0.0)):.3f}"
+                )
+                st.caption(str(source.get("text", ""))[:800])
+
+
+def _split_pasted_papers(value: str) -> list[str]:
+    if not value.strip():
+        return []
+    return [part.strip() for part in re.split(r"(?m)^\s*---\s*$", value) if part.strip()]
 
 
 def render() -> None:
@@ -436,15 +590,21 @@ def render() -> None:
         selected_label = st.selectbox("LLM provider", options=list(label_map.keys()))
         provider_selection = label_map[selected_label]
     else:
-        st.info("No LLM providers are fully configured. The default provider will be attempted.")
+        st.info(
+            "No remote LLM providers are fully configured. The app can still try the default local provider, "
+            "but workflows may fail until provider settings are available."
+        )
 
-    tab_pipeline, tab_chat = st.tabs(["Pipeline", "Chat"])
+    tab_pipeline, tab_chat, tab_rag = st.tabs(["Pipeline", "Chat", "Cross-paper RAG"])
     with tab_pipeline:
         st.caption("Upload a PDF or paste text, then run the multi-agent workflow.")
         _render_pipeline_tab(provider_selection)
 
     with tab_chat:
         _render_chat_tab(provider_selection)
+
+    with tab_rag:
+        _render_rag_tab(provider_selection)
 
 
 if __name__ == "__main__":

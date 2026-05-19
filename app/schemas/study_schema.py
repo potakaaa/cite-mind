@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import ast
 import json
 from json import JSONDecodeError
-from typing import Any
+import re
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from app.utils.logging import get_logger, log_failure
 
 
 class SchemaValidationError(ValueError):
@@ -15,6 +18,7 @@ class BaseLLMSchema(BaseModel):
     """Base schema with helper parsers for LLM JSON output."""
 
     model_config = ConfigDict(extra="forbid")
+    _logger: ClassVar = get_logger("app.schemas.llm")
 
     @staticmethod
     def _extract_json_candidate(payload: str) -> str | None:
@@ -67,6 +71,34 @@ class BaseLLMSchema(BaseModel):
 
         return None
 
+    @staticmethod
+    def _cleanup_json_candidate(candidate: str) -> str:
+        """Repair common LLM JSON defects without changing field content."""
+        text = candidate.strip()
+        if text.startswith("json"):
+            text = text[4:].strip()
+        text = text.replace("\ufeff", "").replace("\u201c", '"').replace("\u201d", '"')
+        text = text.replace("\u2018", "'").replace("\u2019", "'")
+        text = re.sub(r",(\s*[}\]])", r"\1", text)
+        return text
+
+    @classmethod
+    def _decode_json_candidate(cls, candidate: str) -> Any:
+        cleaned = cls._cleanup_json_candidate(candidate)
+        try:
+            return json.loads(cleaned)
+        except JSONDecodeError:
+            pythonish = re.sub(r"\bnull\b", "None", cleaned)
+            pythonish = re.sub(r"\btrue\b", "True", pythonish)
+            pythonish = re.sub(r"\bfalse\b", "False", pythonish)
+            try:
+                python_value = ast.literal_eval(pythonish)
+            except (SyntaxError, ValueError) as exc:
+                raise JSONDecodeError(str(exc), cleaned, 0) from exc
+            if isinstance(python_value, (dict, list)):
+                return python_value
+            raise JSONDecodeError("Decoded value is not a JSON object or array", cleaned, 0)
+
     @classmethod
     def from_llm_json(cls, payload: str) -> "BaseLLMSchema":
         """
@@ -81,15 +113,21 @@ class BaseLLMSchema(BaseModel):
 
         extracted = cls._extract_json_candidate(payload)
         if extracted and extracted != payload:
-            candidate_texts.append(extracted)
+            candidate_texts.insert(0, extracted)
 
         for candidate in candidate_texts:
             try:
-                raw = json.loads(candidate)
+                raw = cls._decode_json_candidate(candidate)
                 break
             except JSONDecodeError as exc:
                 parse_errors.append(f"{exc.msg} (line {exc.lineno}, column {exc.colno})")
         else:
+            cls._logger.warning(
+                "LLM JSON parse failed for %s. response_preview=%r errors=%s",
+                cls.__name__,
+                payload[:500],
+                parse_errors,
+            )
             raise SchemaValidationError(
                 "Invalid JSON response. Parse attempts failed: "
                 + " | ".join(parse_errors)
@@ -98,6 +136,7 @@ class BaseLLMSchema(BaseModel):
         try:
             return cls.model_validate(raw)
         except ValidationError as exc:
+            log_failure(cls._logger, "schema_validation", exc, schema=cls.__name__)
             raise SchemaValidationError(f"Schema validation failed for {cls.__name__}: {exc}") from exc
 
     @classmethod

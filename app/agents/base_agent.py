@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-import logging
 from typing import Any
 
 from app.llm.base_provider import LLMProviderError
 from app.llm.llm_router import LLMRouter
+from app.utils.logging import get_logger, log_failure
 
 
 class AgentExecutionError(RuntimeError):
@@ -19,7 +19,7 @@ class BaseAgent(ABC):
         self.name = name
         self.llm = llm or LLMRouter()
         self.prompt_template = prompt_template
-        self.logger = logging.getLogger(f"app.agents.{self.name}")
+        self.logger = get_logger(f"app.agents.{self.name}")
 
     @abstractmethod
     def build_prompt(self, **kwargs: Any) -> str:
@@ -50,5 +50,5 @@ class BaseAgent(ABC):
             self.logger.info("Agent '%s' finished", self.name)
             return parsed
         except (LLMProviderError, AgentExecutionError, ValueError, TypeError) as exc:
-            self.logger.exception("Agent '%s' failed: %s", self.name, exc)
+            log_failure(self.logger, "agent_execution", exc, agent=self.name, task_type=task_type)
             raise AgentExecutionError(f"Agent '{self.name}' failed: {exc}") from exc

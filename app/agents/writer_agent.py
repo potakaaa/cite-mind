@@ -57,6 +57,10 @@ class WriterAgent(BaseAgent):
             "- Produce markdown that matches the selected output mode.\n"
             "- Ground every statement in provided data.\n"
             "- If a value is unavailable, state it as unavailable/unspecified.\n\n"
+            "Final output structure:\n"
+            "- Clearly separate extracted facts from inferred analysis.\n"
+            "- Put direct study metadata/findings under an 'Extracted facts' heading.\n"
+            "- Put critique, implications, gaps, and recommendations under an 'Inferred analysis' heading.\n\n"
             "Study data (JSON):\n"
             f"{study_json}\n\n"
             "Critique data (JSON or null):\n"
@@ -67,7 +71,18 @@ class WriterAgent(BaseAgent):
         text = str(response).strip()
         if not text:
             raise AgentExecutionError("WriterAgent returned an empty response.")
-        return text
+        lowered = text.lower()
+        has_extracted = "extracted facts" in lowered
+        has_inferred = "inferred analysis" in lowered
+        if has_extracted and has_inferred:
+            return text
+        return (
+            "## Extracted facts\n\n"
+            f"{text}\n\n"
+            "## Inferred analysis\n\n"
+            "No additional inferred analysis was generated beyond the sections above. "
+            "Treat gaps, critique, and recommendations as analysis derived from the extracted facts."
+        )
 
     def run(
         self,

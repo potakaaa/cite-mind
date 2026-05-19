@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-import logging
 
 from app.tools.file_manager import FileManager, FileValidationError
 from app.tools.pdf_reader import PDFReadError, PDFReader
 from app.tools.text_chunker import TextChunker
+from app.utils.logging import get_logger, log_failure
 
 
 class DocumentServiceError(RuntimeError):
@@ -29,7 +29,7 @@ class DocumentService:
         self.pdf_reader = pdf_reader or PDFReader(file_manager=self.file_manager)
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.logger = logging.getLogger("app.services.document")
+        self.logger = get_logger("app.services.document")
 
     def validate_pdf(self, pdf_path: str | Path) -> Path:
         path = Path(pdf_path).expanduser().resolve()
@@ -68,7 +68,7 @@ class DocumentService:
             )
             return extracted
         except (FileValidationError, PDFReadError, ValueError) as exc:
-            self.logger.exception("Failed to extract text from PDF '%s': %s", path, exc)
+            log_failure(self.logger, "pdf_text_extraction", exc, path=str(path))
             raise DocumentServiceError(str(exc)) from exc
 
     def chunk_text(self, text: str, source_name: str = "raw_text.txt") -> list[dict[str, Any]]:
@@ -147,7 +147,7 @@ class DocumentService:
                 **extracted,
             }
         except (FileValidationError, PDFReadError, OSError, ValueError, DocumentServiceError) as exc:
-            self.logger.exception("Document preparation failed: %s", exc)
+            log_failure(self.logger, "document_preparation", exc, pdf_filename=pdf_filename, pdf_path=pdf_path)
             if isinstance(exc, DocumentServiceError):
                 raise
             raise DocumentServiceError(str(exc)) from exc

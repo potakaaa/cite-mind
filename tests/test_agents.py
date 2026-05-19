@@ -71,7 +71,9 @@ def test_critic_and_writer_agents_parse_mocked_provider_responses():
 
     assert isinstance(critique, CritiqueSchema)
     assert critique.gaps == ["G1"]
-    assert report == "# Stable report"
+    assert "Extracted facts" in report
+    assert "# Stable report" in report
+    assert "Inferred analysis" in report
     assert "Study data (JSON)" in critic_llm.calls[0]["prompt"]
     assert "Critique data" in writer_llm.calls[0]["prompt"]
 

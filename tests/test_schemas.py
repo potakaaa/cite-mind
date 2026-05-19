@@ -40,6 +40,26 @@ def test_schema_validation_rejects_extra_fields_and_invalid_json():
         StudySchema.from_llm_data({"title": "T", "unsupported": "value"})
 
 
+def test_study_schema_repairs_common_malformed_llm_json():
+    payload = """
+    ```json
+    {
+      "title": "T",
+      "authors": ["A",],
+      "year": null,
+      "findings": ['F'],
+      "source_notes": [],
+    }
+    ```
+    """
+
+    study = StudySchema.from_llm_json(payload)
+
+    assert study.title == "T"
+    assert study.authors == ["A"]
+    assert study.findings == ["F"]
+
+
 def test_nested_agent_and_final_output_schemas_validate_required_shapes():
     agent_output = AgentOutputSchema.from_llm_data(
         {

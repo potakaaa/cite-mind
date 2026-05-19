@@ -13,8 +13,10 @@ Cite Mind is a lightweight multi-agent research assistant for reading papers and
 - Use a multi-agent pipeline with a research reader, optional critic, and writer.
 - Select an LLM provider from configured providers: Ollama, Gemini, or OpenRouter.
 - Chat with an assistant, optionally grounded in uploaded or pasted document context.
+- Optionally index multiple papers for cross-paper RAG question answering.
 - Save generated outputs under `data/outputs/`.
 - Save extracted PDF text under `data/extracted_text/`.
+- Save optional RAG vector data under `data/vector_db/`.
 
 ## Requirements
 
@@ -121,6 +123,8 @@ python main.py
 
 The `Chat` tab supports general research planning questions. You can optionally upload a PDF or paste text first so the chat response uses document context.
 
+The `Cross-paper RAG` tab is disabled by default for the MVP path. To use it, either enable the in-app checkbox or set `RAG_ENABLED=true` in `.env`, then index multiple PDFs or pasted papers before asking a question. Retrieved source chunk metadata is shown with each answer.
+
 ## Project Structure
 
 ```text
@@ -132,6 +136,7 @@ cite-mind/
 │   ├── llm/
 │   ├── orchestrator/
 │   ├── prompts/
+│   ├── rag/
 │   ├── schemas/
 │   ├── services/
 │   ├── tools/
@@ -139,7 +144,8 @@ cite-mind/
 ├── data/
 │   ├── extracted_text/
 │   ├── outputs/
-│   └── uploads/
+│   ├── uploads/
+│   └── vector_db/
 ├── docs/
 └── tests/
 ```

@@ -12,6 +12,7 @@ import sys
 
 from config import settings
 from app.llm import LLMProviderError, LLMRouter
+from app.utils.logging import configure_logging
 
 
 def _print_environment() -> None:
@@ -46,6 +47,7 @@ def _launch_streamlit() -> None:
 
 
 def main() -> None:
+    configure_logging()
     if "--ui" in sys.argv:
         _launch_streamlit()
         return

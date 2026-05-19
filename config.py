@@ -53,6 +53,19 @@ class Settings(BaseModel):
     output_dir: Path = Field(
         default=Path(os.getenv("OUTPUT_DIR", str(Path(__file__).resolve().parent / "data" / "outputs")))
     )
+    vector_db_dir: Path = Field(
+        default=Path(os.getenv("VECTOR_DB_DIR", str(Path(__file__).resolve().parent / "data" / "vector_db")))
+    )
+
+    # Optional RAG layer
+    rag_enabled: bool = Field(default=os.getenv("RAG_ENABLED", "false").lower() in {"1", "true", "yes", "on"})
+    rag_embedding_backend: str = Field(default=os.getenv("RAG_EMBEDDING_BACKEND", "auto"))
+    rag_embedding_model: str = Field(
+        default=os.getenv("RAG_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    )
+    rag_hash_dimensions: int = Field(default=int(os.getenv("RAG_HASH_DIMENSIONS", "384")), ge=1)
+    rag_top_k: int = Field(default=int(os.getenv("RAG_TOP_K", "5")), ge=1)
+    rag_context_max_chars: int = Field(default=int(os.getenv("RAG_CONTEXT_MAX_CHARS", "12000")), ge=500)
 
     def validate_provider_config(self, provider: LlmProvider | None = None) -> None:
         """Validate only the selected provider configuration.

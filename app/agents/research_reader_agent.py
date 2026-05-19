@@ -5,6 +5,7 @@ from typing import Any
 
 from app.agents.base_agent import AgentExecutionError, BaseAgent
 from app.schemas.study_schema import SchemaValidationError, StudySchema
+from app.utils.logging import log_failure
 from app.utils.prompt_loader import load_prompt_template
 
 
@@ -60,6 +61,7 @@ class ResearchReaderAgent(BaseAgent):
         try:
             return StudySchema.from_llm_json(response)
         except SchemaValidationError as exc:
+            log_failure(self.logger, "research_reader_parse", exc, response_preview=response[:500])
             raise AgentExecutionError(f"ResearchReaderAgent returned invalid study JSON: {exc}") from exc
 
     def _chunk_text(self, text: str) -> list[str]:
@@ -170,7 +172,7 @@ class ResearchReaderAgent(BaseAgent):
             self.logger.info("Agent '%s' finished", self.name)
             return result
         except Exception as exc:
-            self.logger.exception("Agent '%s' failed: %s", self.name, exc)
+            log_failure(self.logger, "agent_execution", exc, agent=self.name, task_type=task_type)
             if isinstance(exc, AgentExecutionError):
                 raise
             raise AgentExecutionError(f"Agent '{self.name}' failed: {exc}") from exc

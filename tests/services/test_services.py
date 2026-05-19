@@ -68,11 +68,11 @@ def test_research_service_returns_markdown_for_raw_text():
     orchestrator = StubOrchestrator()
     service = ResearchService(orchestrator=orchestrator)
 
-    output = service.run(task_type=TaskType.STUDY_TABLE, raw_text="paper text")
+    output = service.run(task_type=TaskType.STUDY_TABLE, raw_text="paper text " * 10)
 
     assert output == "# Final Markdown"
     assert len(orchestrator.calls) == 1
-    assert orchestrator.calls[0].paper_text == "paper text"
+    assert orchestrator.calls[0].paper_text == ("paper text " * 10).strip()
 
 
 def test_research_service_supports_pdf_input_and_metadata(monkeypatch, tmp_path: Path):
@@ -86,7 +86,7 @@ def test_research_service_supports_pdf_input_and_metadata(monkeypatch, tmp_path:
         service.document_service,
         "prepare_document",
         lambda **kwargs: {
-            "paper_text": "PDF extracted text",
+            "paper_text": "PDF extracted text " * 6,
             "source_type": "pdf",
             "source_file": "paper.pdf",
             "source_path": str(pdf_path),
@@ -105,7 +105,7 @@ def test_research_service_supports_pdf_input_and_metadata(monkeypatch, tmp_path:
     assert isinstance(result, dict)
     assert result["final_output"] == "# Final Markdown"
     assert result["metadata"]["document"]["source_type"] == "pdf"
-    assert orchestrator.calls[0].paper_text == "PDF extracted text"
+    assert orchestrator.calls[0].paper_text == ("PDF extracted text " * 6).strip()
 
 
 def test_research_service_wraps_document_errors(monkeypatch):
@@ -120,3 +120,13 @@ def test_research_service_wraps_document_errors(monkeypatch):
         service.run(task_type=TaskType.STUDY_TABLE, raw_text="x")
 
     assert "Document processing failed" in str(exc.value)
+
+
+def test_research_service_rejects_too_short_input_before_pipeline():
+    orchestrator = StubOrchestrator()
+    service = ResearchService(orchestrator=orchestrator)
+
+    with pytest.raises(ResearchServiceError, match="too short"):
+        service.run(task_type=TaskType.STUDY_TABLE, raw_text="tiny")
+
+    assert orchestrator.calls == []

@@ -75,7 +75,9 @@ def test_writer_agent_requires_valid_mode_and_returns_text():
     study = StudySchema(title="T", authors=[], findings=[])
 
     result = agent.run(study=study, mode="summary")
-    assert result == "# Output"
+    assert "Extracted facts" in result
+    assert "# Output" in result
+    assert "Inferred analysis" in result
 
     with pytest.raises(AgentExecutionError):
         agent.run(study=study, mode="unknown_mode")
