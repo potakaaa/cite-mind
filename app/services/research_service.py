@@ -8,7 +8,7 @@ from typing import Any
 from app.orchestrator.orchestrator import Orchestrator, PipelineValidationError
 from app.orchestrator.task_schema import TaskInput, TaskType
 from app.services.document_service import DocumentService, DocumentServiceError
-from app.utils.logging import get_logger, log_failure
+from app.utils.logging import WorkflowActivityLogger, get_logger, log_failure
 
 
 class ResearchServiceError(RuntimeError):
@@ -24,9 +24,13 @@ class ResearchService:
         self,
         document_service: DocumentService | None = None,
         orchestrator: Orchestrator | None = None,
+        activity_logger: WorkflowActivityLogger | None = None,
     ) -> None:
         self.document_service = document_service or DocumentService()
-        self.orchestrator = orchestrator or Orchestrator()
+        self.activity_logger = activity_logger
+        self.orchestrator = orchestrator or Orchestrator(activity_logger=activity_logger)
+        if orchestrator is not None and activity_logger is not None:
+            self.orchestrator.activity_logger = activity_logger
         self.logger = get_logger("app.services.research")
 
     def run(
@@ -100,6 +104,7 @@ class ResearchService:
             "metadata": {
                 "task_type": result.task_type.value,
                 "steps": [step.model_dump() for step in result.steps],
+                "activity_log": self.activity_logger.dumps() if self.activity_logger else [],
                 "intermediate": result.intermediate,
                 "document": {
                     "source_type": document.get("source_type"),

@@ -4,6 +4,7 @@ import pytest
 
 from app.orchestrator.orchestrator import Orchestrator, PipelineValidationError
 from app.orchestrator.task_schema import TaskInput, TaskType
+from app.utils.logging import WorkflowActivityLogger
 
 
 class StubResearch:
@@ -105,6 +106,48 @@ def test_orchestrator_stops_pipeline_on_validation_error():
     assert "stopped at step 'critic'" in str(exc.value)
     assert len(research.calls) == 1
     assert len(writer.calls) == 0
+
+
+def test_orchestrator_records_human_readable_activity_log():
+    activity_logger = WorkflowActivityLogger()
+    orchestrator = build_orchestrator()
+    orchestrator.activity_logger = activity_logger
+
+    result = orchestrator.run(TaskInput(task_type=TaskType.FULL_REPORT, paper_text="sample paper"))
+
+    assert result.final_output == "mode=full_report;critique=True"
+    entries = activity_logger.dumps()
+    agent_entries = [entry for entry in entries if entry["actor"] != "Orchestrator"]
+    assert [entry["actor"] for entry in agent_entries] == [
+        "Researcher",
+        "Researcher",
+        "Critic",
+        "Critic",
+        "Writer",
+        "Writer",
+    ]
+    assert entries[0]["actor"] == "Orchestrator"
+    assert agent_entries[0]["status"] == "running"
+    assert "is reading the paper" in agent_entries[0]["action"]
+    assert agent_entries[-1]["status"] == "ok"
+    assert "duration_ms=" in agent_entries[-1]["detail"]
+
+
+def test_orchestrator_records_failed_activity_log_entry():
+    activity_logger = WorkflowActivityLogger()
+    research = StubResearch()
+    critic = FailingCritic()
+    writer = StubWriter()
+    orchestrator = build_orchestrator(research=research, critic=critic, writer=writer)
+    orchestrator.activity_logger = activity_logger
+
+    with pytest.raises(PipelineValidationError):
+        orchestrator.run(TaskInput(task_type=TaskType.FULL_REPORT, paper_text="sample paper"))
+
+    failed_entries = [entry for entry in activity_logger.dumps() if entry["status"] == "failed"]
+    assert len(failed_entries) == 1
+    assert failed_entries[0]["actor"] == "Critic"
+    assert "invalid critique payload" in failed_entries[0]["detail"]
 
 
 def test_unsupported_task_type_returns_clear_error():

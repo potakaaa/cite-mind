@@ -1,22 +1,76 @@
 # Cite Mind
 
-Cite Mind is a lightweight multi-agent research assistant for reading papers and turning them into structured research outputs. The current MVP runs as a Streamlit app, accepts a PDF or pasted paper text, routes the work through specialized agents, and exports the final result as Markdown, DOCX, and PDF.
+Cite Mind is a chat-first, multi-agent assistant. The intended experience is a normal chatbot: open the app, choose a model provider if needed, type a message, and keep the conversation going. Attachments are optional context, not the center of the product.
 
-## MVP Features
+The app can still use multiple specialized agents behind the scenes, but the user experience should stay simple. Users should not have to understand pipelines, task types, exports, or retrieval settings before they can ask a question.
 
-- Upload a PDF or paste raw paper text.
-- Run one of four supported workflows:
-  - `study_table`
-  - `study_table_with_gaps`
-  - `paper_summary`
-  - `full_report`
-- Use a multi-agent pipeline with a research reader, optional critic, and writer.
-- Select an LLM provider from configured providers: Ollama, Gemini, or OpenRouter.
-- Chat with an assistant, optionally grounded in uploaded or pasted document context.
-- Optionally index multiple papers for cross-paper RAG question answering.
-- Save generated outputs under `data/outputs/`.
-- Save extracted PDF text under `data/extracted_text/`.
-- Save optional RAG vector data under `data/vector_db/`.
+## Product Direction
+
+- A single primary chat interface.
+- Optional file attachments for extra context.
+- Multi-agent reasoning handled in the background.
+- Simple provider configuration for Ollama, Gemini, or OpenRouter.
+- Conversation history that keeps recent context available.
+- Research help when documents are attached, without forcing a separate workflow.
+- Minimal controls in the main UI.
+
+## Current Status
+
+The codebase currently contains an earlier research-workflow MVP. Some modules still support structured paper workflows, exports, and optional cross-paper retrieval. Those pieces are implementation details for now and should be folded into the simpler chat experience over time.
+
+The README describes the desired app context going forward:
+
+```text
+user message + optional attachments
+        |
+chat UI
+        |
+multi-agent coordinator
+        |
+specialized agents as needed
+        |
+assistant response
+```
+
+## Expected Chat Experience
+
+Users should be able to:
+
+1. Open the app.
+2. Type a message.
+3. Optionally attach PDFs or text files.
+4. Ask follow-up questions naturally.
+5. Receive one clear assistant response.
+
+Example prompts:
+
+```text
+Help me understand this paper.
+```
+
+```text
+Summarize the attached document and tell me what questions I should ask next.
+```
+
+```text
+Compare the methods used in these files.
+```
+
+```text
+Draft a literature review outline from this conversation.
+```
+
+## Multi-Agent Behavior
+
+The app may route work through agents such as:
+
+- A coordinator that decides what needs to happen.
+- A reader that extracts useful details from attached documents.
+- A critic that checks limitations, gaps, and weak reasoning.
+- A writer that turns the result into a clear response.
+- A citation or search helper when paper lookup is needed.
+
+This should feel like one assistant to the user. Agent names, intermediate steps, and workflow controls should only appear when they are useful for transparency or debugging.
 
 ## Requirements
 
@@ -84,7 +138,7 @@ OPENROUTER_API_KEY=your_openrouter_api_key
 OPENROUTER_MODEL=meta-llama/llama-3.1-8b-instruct
 ```
 
-You can configure more than one provider. The Streamlit app shows the providers that pass local configuration validation.
+You can configure more than one provider. The app should show only providers that pass local configuration validation.
 
 ## Run The App
 
@@ -112,18 +166,17 @@ To run an optional LLM smoke test, set `LLM_SMOKE_TEST_PROMPT` in `.env` and run
 python main.py
 ```
 
-## Basic Usage
+## Usage
+
+The target usage is:
 
 1. Open the Streamlit app.
-2. Choose an available LLM provider.
-3. In the `Pipeline` tab, upload a PDF or paste paper text.
-4. Select a task type.
-5. Click `Run workflow`.
-6. Review the final output and download Markdown, DOCX, or PDF exports.
+2. Select an available LLM provider only if needed.
+3. Type a message in the chat input.
+4. Optionally attach files for context.
+5. Continue asking follow-up questions.
 
-The `Chat` tab supports general research planning questions. You can optionally upload a PDF or paste text first so the chat response uses document context.
-
-The `Cross-paper RAG` tab is disabled by default for the MVP path. To use it, either enable the in-app checkbox or set `RAG_ENABLED=true` in `.env`, then index multiple PDFs or pasted papers before asking a question. Retrieved source chunk metadata is shown with each answer.
+Attachments should support research-style questions, summaries, comparisons, critique, and drafting. The assistant should decide whether to call document-reading, critique, writing, retrieval, or citation helpers.
 
 ## Project Structure
 
@@ -156,6 +209,8 @@ cite-mind/
 - [Architecture](docs/architecture.md)
 - [Usage](docs/usage.md)
 
+Some docs still describe the older workflow-oriented MVP and should be updated after the chat-first UI is implemented.
+
 ## Troubleshooting
 
 ### Missing API Key
@@ -180,9 +235,9 @@ ollama pull llama3.1:8b
 
 Also confirm `OLLAMA_BASE_URL` matches the local Ollama server URL.
 
-### PDF Extraction Errors
+### Attachment Text Cannot Be Read
 
-Cite Mind uses PyMuPDF first and pdfplumber as a fallback. Extraction can fail when a PDF is scanned/image-only, corrupted, encrypted, or not actually a PDF. Try a text-based PDF, paste the paper text directly, or run OCR outside Cite Mind before uploading.
+PDF extraction can fail when a PDF is scanned, image-only, corrupted, encrypted, or not actually a PDF. Try a text-based PDF, paste the document text directly, or run OCR before uploading.
 
 ## Tests
 

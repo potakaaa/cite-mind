@@ -10,7 +10,7 @@ from app.agents.writer_agent import WriterAgent
 from app.orchestrator.pipeline import PipelineDefinition, get_pipeline_map
 from app.orchestrator.task_router import TaskRouter, UnsupportedTaskTypeError
 from app.orchestrator.task_schema import StepMeta, TaskInput, TaskResult, TaskType
-from app.utils.logging import get_logger, log_failure
+from app.utils.logging import WorkflowActivityLogger, get_logger, log_failure
 
 
 class PipelineValidationError(RuntimeError):
@@ -26,8 +26,10 @@ class Orchestrator:
         critic: CriticAgent | None = None,
         writer: WriterAgent | None = None,
         router: TaskRouter | None = None,
+        activity_logger: WorkflowActivityLogger | None = None,
     ) -> None:
         self.logger = get_logger("app.orchestrator")
+        self.activity_logger = activity_logger
         self.router = router or TaskRouter()
         self.pipelines = get_pipeline_map()
         self.agents = {
@@ -55,6 +57,7 @@ class Orchestrator:
         return self._execute_pipeline(task_input=task_input, pipeline=pipeline)
 
     def _execute_pipeline(self, task_input: TaskInput, pipeline: PipelineDefinition) -> TaskResult:
+        pipeline_start = time.perf_counter()
         context: dict[str, Any] = {
             "paper_text": task_input.paper_text,
             "writer_mode": pipeline.writer_mode,
@@ -62,6 +65,12 @@ class Orchestrator:
             "user_metadata": dict(task_input.metadata),
         }
         step_meta: list[StepMeta] = []
+
+        if self.activity_logger is not None:
+            self.activity_logger.workflow_started(
+                pipeline_name=pipeline.name,
+                task_type=task_input.task_type.value,
+            )
 
         for step in pipeline.steps:
             start = time.perf_counter()
@@ -73,6 +82,12 @@ class Orchestrator:
                     step.agent_key,
                 )
                 agent = self.agents[step.agent_key]
+                if self.activity_logger is not None:
+                    self.activity_logger.agent_started(
+                        agent.name,
+                        step_name=step.name,
+                        pipeline_name=pipeline.name,
+                    )
                 step_input = step.input_builder(context)
                 output = agent.run(
                     provider=task_input.provider,
@@ -81,15 +96,23 @@ class Orchestrator:
                 )
                 context[step.output_key] = output
 
+                duration_ms = int((time.perf_counter() - start) * 1000)
                 step_meta.append(
                     StepMeta(
                         step_name=step.name,
                         agent=agent.name,
                         status="ok",
-                        duration_ms=int((time.perf_counter() - start) * 1000),
+                        duration_ms=duration_ms,
                         output_keys=[step.output_key],
                     )
                 )
+                if self.activity_logger is not None:
+                    self.activity_logger.agent_finished(
+                        agent.name,
+                        step_name=step.name,
+                        pipeline_name=pipeline.name,
+                        duration_ms=duration_ms,
+                    )
                 self.logger.info(
                     "Pipeline '%s' finished step '%s' in %sms",
                     pipeline.name,
@@ -97,17 +120,27 @@ class Orchestrator:
                     step_meta[-1].duration_ms,
                 )
             except (AgentExecutionError, KeyError, TypeError, ValueError) as exc:
+                agent_name = (
+                    self.agents.get(step.agent_key).name
+                    if step.agent_key in self.agents
+                    else step.agent_key
+                )
                 step_meta.append(
                     StepMeta(
                         step_name=step.name,
-                        agent=self.agents.get(step.agent_key).name
-                        if step.agent_key in self.agents
-                        else step.agent_key,
+                        agent=agent_name,
                         status="failed",
                         duration_ms=int((time.perf_counter() - start) * 1000),
                         error=str(exc),
                     )
                 )
+                if self.activity_logger is not None:
+                    self.activity_logger.agent_failed(
+                        agent_name,
+                        step_name=step.name,
+                        pipeline_name=pipeline.name,
+                        error=exc,
+                    )
                 log_failure(
                     self.logger,
                     "pipeline_step",
@@ -137,6 +170,12 @@ class Orchestrator:
         intermediate["pipeline"] = pipeline.name
         intermediate["writer_mode"] = pipeline.writer_mode
         intermediate["input_metadata"] = dict(task_input.metadata)
+
+        if self.activity_logger is not None:
+            self.activity_logger.workflow_finished(
+                pipeline_name=pipeline.name,
+                duration_ms=int((time.perf_counter() - pipeline_start) * 1000),
+            )
 
         return TaskResult(
             task_type=task_input.task_type,

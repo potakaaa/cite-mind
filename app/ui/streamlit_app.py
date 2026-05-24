@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from config import settings
 from app.llm import LLMRouter
@@ -17,7 +18,13 @@ from app.services.document_service import DocumentService, DocumentServiceError
 from app.services.export_service import ExportService, ExportServiceError
 from app.services.research_service import ResearchService, ResearchServiceError
 from app.tools.citation_lookup import CitationLookup, CitationLookupError, PaperSearchResult
-from app.utils.logging import configure_logging, get_logger, log_failure
+from app.utils.logging import (
+    ActivityLogEntry,
+    WorkflowActivityLogger,
+    configure_logging,
+    get_logger,
+    log_failure,
+)
 
 
 configure_logging()
@@ -33,9 +40,10 @@ TASK_OPTIONS: list[tuple[str, TaskType]] = [
 
 
 CHAT_SYSTEM_PROMPT = (
-    "You are a research assistant. Help the user plan papers, identify relevant methods, and suggest "
-    "search terms, evaluation designs, and pitfalls. Be explicit when you are unsure. "
-    "If document context is provided, prioritize it and quote short snippets where helpful."
+    "You are Cite Mind, a practical multi-agent chatbot. Give direct, useful answers in a normal "
+    "conversation. When attachments are provided, use them as context without making the user choose "
+    "a workflow. Be explicit when you are unsure, do not invent sources, and keep the response focused "
+    "on the user's latest message."
 )
 
 
@@ -167,6 +175,356 @@ def _provider_label(provider: str) -> str:
     return provider
 
 
+WORKFLOW_ACTOR_COPY: dict[str, dict[str, str]] = {
+    "Orchestrator": {
+        "title": "Orchestrator",
+        "initial": "O",
+        "accent": "#8b5cf6",
+        "idle": "Waiting to coordinate the workflow",
+        "running": "Coordinating the active pipeline",
+        "ok": "Wrapped the agent outputs into the final result",
+        "failed": "Stopped the workflow",
+    },
+    "Researcher": {
+        "title": "Researcher",
+        "initial": "R",
+        "accent": "#38bdf8",
+        "idle": "Waiting for paper text",
+        "running": "Reading the paper and extracting study details",
+        "ok": "Extracted structured study data",
+        "failed": "Could not extract study data",
+    },
+    "Critic": {
+        "title": "Critic",
+        "initial": "C",
+        "accent": "#f59e0b",
+        "idle": "Waiting for extracted study data",
+        "running": "Criticizing gaps, limitations, and weak evidence",
+        "ok": "Finished the critique",
+        "failed": "Could not complete the critique",
+        "skipped": "Not used for this task type",
+    },
+    "Writer": {
+        "title": "Writer",
+        "initial": "W",
+        "accent": "#22c55e",
+        "idle": "Waiting for agent outputs",
+        "running": "Writing the final markdown output",
+        "ok": "Finished writing",
+        "failed": "Could not write the final output",
+    },
+}
+
+
+def _workflow_style() -> str:
+    return """
+    <style>
+    :root {
+        color-scheme: dark;
+        font-family: "Source Sans Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+        margin: 0;
+        background: transparent;
+        color: #eef2ff;
+    }
+    .cm-workflow-shell {
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        border-radius: 8px;
+        background:
+            linear-gradient(135deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.98)),
+            #0f172a;
+        box-shadow: 0 16px 40px rgba(2, 6, 23, 0.22);
+        padding: 16px;
+        overflow: hidden;
+    }
+    .cm-workflow-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 14px;
+    }
+    .cm-workflow-title {
+        font-size: 0.98rem;
+        font-weight: 750;
+        letter-spacing: 0;
+        color: #f8fafc;
+    }
+    .cm-workflow-subtitle {
+        margin-top: 3px;
+        font-size: 0.78rem;
+        color: #94a3b8;
+    }
+    .cm-workflow-count {
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        border-radius: 999px;
+        padding: 0.28rem 0.56rem;
+        color: #cbd5e1;
+        background: rgba(15, 23, 42, 0.7);
+        font-size: 0.74rem;
+        white-space: nowrap;
+    }
+    .cm-workflow-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin: 0 0 14px;
+    }
+    .cm-agent-card {
+        position: relative;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 8px;
+        padding: 12px;
+        background: rgba(15, 23, 42, 0.74);
+        min-height: 116px;
+        overflow: hidden;
+    }
+    .cm-agent-card::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 3px;
+        background: var(--accent);
+        opacity: 0.8;
+    }
+    .cm-agent-card.running {
+        border-color: var(--accent);
+        background: linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.72));
+    }
+    .cm-agent-card.ok { border-color: rgba(34, 197, 94, 0.35); }
+    .cm-agent-card.failed { border-color: rgba(248, 113, 113, 0.55); }
+    .cm-agent-card.skipped {
+        opacity: 0.68;
+        border-style: dashed;
+        background: rgba(30, 41, 59, 0.44);
+    }
+    .cm-agent-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+    .cm-agent-heading {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        gap: 8px;
+    }
+    .cm-agent-initial {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        color: #020617;
+        background: var(--accent);
+        font-weight: 800;
+        font-size: 0.78rem;
+        flex: 0 0 auto;
+    }
+    .cm-agent-name {
+        font-weight: 750;
+        font-size: 0.95rem;
+        color: #f8fafc;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .cm-agent-status {
+        font-size: 0.7rem;
+        line-height: 1;
+        border-radius: 999px;
+        padding: 0.28rem 0.48rem;
+        background: rgba(148, 163, 184, 0.14);
+        color: #cbd5e1;
+        white-space: nowrap;
+    }
+    .cm-agent-card.running .cm-agent-status { color: #dbeafe; background: rgba(59, 130, 246, 0.2); }
+    .cm-agent-card.ok .cm-agent-status { color: #bbf7d0; background: rgba(34, 197, 94, 0.16); }
+    .cm-agent-card.failed .cm-agent-status { color: #fecaca; background: rgba(239, 68, 68, 0.18); }
+    .cm-agent-body { color: #dbe4f0; font-size: 0.86rem; line-height: 1.38; }
+    .cm-agent-detail {
+        color: #94a3b8;
+        font-size: 0.72rem;
+        margin-top: 8px;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+    .cm-activity-list {
+        display: grid;
+        gap: 7px;
+        margin-top: 2px;
+    }
+    .cm-activity-row {
+        position: relative;
+        border: 1px solid rgba(148, 163, 184, 0.14);
+        border-radius: 8px;
+        color: #cbd5e1;
+        font-size: 0.82rem;
+        line-height: 1.35;
+        padding: 9px 10px 9px 34px;
+        background: rgba(2, 6, 23, 0.28);
+    }
+    .cm-activity-dot {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.12);
+    }
+    .cm-activity-row strong { color: #f8fafc; }
+    .cm-activity-row span { display: block; color: #94a3b8; font-size: 0.73rem; margin-top: 2px; overflow-wrap: anywhere; }
+    @media (max-width: 900px) {
+        .cm-workflow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 560px) {
+        .cm-workflow-grid { grid-template-columns: 1fr; }
+    }
+    </style>
+    """
+
+
+def _planned_workflow_actors(task_type: TaskType) -> list[str]:
+    actors = ["Researcher"]
+    if task_type in (TaskType.STUDY_TABLE_WITH_GAPS, TaskType.FULL_REPORT):
+        actors.append("Critic")
+    actors.extend(["Writer", "Orchestrator"])
+    return actors
+
+
+def _entry_to_dict(entry: ActivityLogEntry | dict[str, Any]) -> dict[str, Any]:
+    return entry.model_dump() if isinstance(entry, ActivityLogEntry) else entry
+
+
+def _workflow_activity_html(
+    activity_log: list[ActivityLogEntry | dict[str, Any]],
+    *,
+    task_type: TaskType,
+) -> str:
+    entries = [_entry_to_dict(entry) for entry in activity_log]
+    planned = _planned_workflow_actors(task_type)
+    latest_by_actor: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        actor = str(entry.get("actor", ""))
+        if actor:
+            latest_by_actor[actor] = entry
+
+    cards: list[str] = []
+    for actor in ["Researcher", "Critic", "Writer", "Orchestrator"]:
+        copy = WORKFLOW_ACTOR_COPY[actor]
+        if actor not in planned:
+            status = "skipped"
+            body = copy.get("skipped", "Skipped")
+            detail = ""
+        else:
+            entry = latest_by_actor.get(actor)
+            status = str(entry.get("status", "idle")) if entry else "idle"
+            body = copy.get(status, copy["idle"])
+            detail = str(entry.get("detail") or "") if entry else ""
+
+        cards.append(
+            "<div class='cm-agent-card {status}' style='--accent:{accent}'>"
+            "<div class='cm-agent-top'>"
+            "<div class='cm-agent-heading'>"
+            "<div class='cm-agent-initial'>{initial}</div>"
+            "<div class='cm-agent-name'>{title}</div>"
+            "</div>"
+            "<div class='cm-agent-status'>{status_label}</div>"
+            "</div>"
+            "<div class='cm-agent-body'>{body}</div>"
+            "<div class='cm-agent-detail'>{detail}</div>"
+            "</div>".format(
+                status=escape(status),
+                accent=escape(copy["accent"]),
+                initial=escape(copy["initial"]),
+                title=escape(copy["title"]),
+                status_label=escape(status.replace("_", " ").title()),
+                body=escape(body),
+                detail=escape(detail),
+            )
+        )
+
+    if entries:
+        activity_rows = "\n".join(
+            "<div class='cm-activity-row' style='--accent:{accent}'>"
+            "<div class='cm-activity-dot'></div>"
+            "<strong>{actor}</strong> {action}{detail}</div>".format(
+                accent=escape(WORKFLOW_ACTOR_COPY.get(str(entry.get("actor", "")), WORKFLOW_ACTOR_COPY["Orchestrator"])["accent"]),
+                actor=escape(str(entry.get("actor", ""))),
+                action=escape(str(entry.get("action", ""))),
+                detail=(
+                    "<br><span>"
+                    + escape(str(entry.get("detail", "")))
+                    + "</span>"
+                    if entry.get("detail")
+                    else ""
+                ),
+            )
+            for entry in entries[-8:]
+        )
+    else:
+        activity_rows = (
+            "<div class='cm-activity-row' style='--accent:#64748b'>"
+            "<div class='cm-activity-dot'></div>"
+            "<strong>Workflow</strong> Waiting to start.</div>"
+        )
+
+    return (
+        _workflow_style()
+        + "<div class='cm-workflow-shell'>"
+        + "<div class='cm-workflow-head'>"
+        + "<div><div class='cm-workflow-title'>Workflow activity</div>"
+        + "<div class='cm-workflow-subtitle'>Live agent progress for this run</div></div>"
+        + f"<div class='cm-workflow-count'>{len(entries)} events</div>"
+        + "</div>"
+        + "<div class='cm-workflow-grid'>"
+        + "\n".join(cards)
+        + "</div>"
+        + "<div class='cm-activity-list'>"
+        + activity_rows
+        + "</div>"
+        + "</div>"
+    )
+
+
+def _workflow_component_height(activity_log: list[ActivityLogEntry | dict[str, Any]]) -> int:
+    visible_rows = min(max(len(activity_log), 1), 8)
+    return 250 + (visible_rows * 46)
+
+
+def _render_workflow_activity(
+    activity_log: list[ActivityLogEntry | dict[str, Any]],
+    *,
+    task_type: TaskType,
+) -> None:
+    components.html(
+        _workflow_activity_html(activity_log, task_type=task_type),
+        height=_workflow_component_height(activity_log),
+        scrolling=False,
+    )
+
+
+class _WorkflowLogView:
+    def __init__(self, placeholder: Any, task_type: TaskType) -> None:
+        self.placeholder = placeholder
+        self.entries: list[ActivityLogEntry] = []
+        self.task_type = task_type
+
+    def add(self, entry: ActivityLogEntry) -> None:
+        self.entries.append(entry)
+        self.render()
+
+    def render(self) -> None:
+        with self.placeholder.container():
+            _render_workflow_activity(self.entries, task_type=self.task_type)
+
+
 def _run_workflow(
     *,
     service: ResearchService,
@@ -259,8 +617,119 @@ def _ingest_document_context(
     return str(document.get("paper_text", "")).strip()
 
 
+def _uploaded_file_bytes(uploaded_file: Any) -> bytes:
+    if hasattr(uploaded_file, "getvalue"):
+        value = uploaded_file.getvalue()
+        return bytes(value)
+    return bytes(uploaded_file.read())
+
+
+def _attachment_name(uploaded_file: Any, fallback: str = "attachment") -> str:
+    name = getattr(uploaded_file, "name", fallback)
+    return str(name or fallback)
+
+
+def _build_attachment_context(uploaded_files: list[Any] | None, pasted_context: str) -> str:
+    document_service = DocumentService()
+    context_parts: list[str] = []
+
+    for uploaded_file in uploaded_files or []:
+        filename = _attachment_name(uploaded_file)
+        file_bytes = _uploaded_file_bytes(uploaded_file)
+        if not file_bytes:
+            continue
+
+        if filename.lower().endswith(".pdf"):
+            document = document_service.prepare_document(
+                pdf_bytes=file_bytes,
+                pdf_filename=filename,
+            )
+            text = str(document.get("paper_text", "")).strip()
+        else:
+            text = file_bytes.decode("utf-8", errors="replace").strip()
+
+        if text:
+            context_parts.append(f"Attachment: {filename}\n{text}")
+
+    if pasted_context.strip():
+        context_parts.append(f"Pasted context:\n{pasted_context.strip()}")
+
+    return "\n\n---\n\n".join(context_parts)
+
+
+def _render_chat_agent_activity(
+    placeholder: Any,
+    *,
+    active: str,
+    completed: list[str] | None = None,
+    failed: str | None = None,
+) -> None:
+    del completed
+    active_messages = {
+        "Researcher": "Researcher is reading context and looking for useful evidence",
+        "Critic": "Critic is checking gaps, limitations, and weak assumptions",
+        "Writer": "Writer is drafting the response",
+        "Orchestrator": "Orchestrator is coordinating the answer",
+    }
+    failed_messages = {
+        "Researcher": "Researcher failed while reading context",
+        "Critic": "Critic failed while reviewing the answer",
+        "Writer": "Writer failed while drafting the response",
+        "Orchestrator": "Orchestrator failed while coordinating the answer",
+    }
+    if failed:
+        message = failed_messages.get(failed, f"{failed} failed")
+        state_class = "failed"
+    elif active:
+        message = active_messages.get(active, f"{active} is working")
+        state_class = "running"
+    else:
+        message = "Orchestrator is wrapping up"
+        state_class = "running"
+
+    status_class = escape(state_class)
+    status_message = escape(message)
+    placeholder.markdown(
+        f"""
+        <style>
+        .cm-agent-status-line {{
+            display: inline-flex;
+            align-items: center;
+            min-height: 3.5rem;
+            margin-left: 0.45rem;
+            margin-top: -1.05rem;
+            padding: 0;
+            font-weight: 650;
+            line-height: 1.35;
+        }}
+        .cm-agent-status-line.running {{
+            color: transparent;
+            background: linear-gradient(
+                90deg,
+                #94a3b8,
+                #f8fafc,
+                #94a3b8
+            );
+            background-size: 220% 100%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            animation: cm-agent-shimmer 1.35s linear infinite;
+        }}
+        .cm-agent-status-line.failed {{
+            color: #fecaca;
+        }}
+        @keyframes cm-agent-shimmer {{
+            0% {{ background-position: 220% 0; }}
+            100% {{ background-position: -220% 0; }}
+        }}
+        </style>
+        <div class="cm-agent-status-line {status_class}">{status_message}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _render_pipeline_tab(provider_selection: str | None) -> None:
-    service = ResearchService()
     if "pipeline_result" not in st.session_state:
         st.session_state.pipeline_result = None
     if "pipeline_task_type" not in st.session_state:
@@ -280,7 +749,12 @@ def _render_pipeline_tab(provider_selection: str | None) -> None:
     task_type = next(task for label, task in TASK_OPTIONS if label == task_label)
 
     run_clicked = st.button("Run workflow", type="primary", use_container_width=True, key="pipeline_run")
+    activity_placeholder = st.empty()
     if run_clicked:
+        activity_view = _WorkflowLogView(activity_placeholder, task_type)
+        activity_view.render()
+        activity_logger = WorkflowActivityLogger(on_entry=activity_view.add)
+        service = ResearchService(activity_logger=activity_logger)
         try:
             if source_type == "Upload PDF":
                 if uploaded_pdf is None:
@@ -311,6 +785,7 @@ def _render_pipeline_tab(provider_selection: str | None) -> None:
                 )
             st.session_state.pipeline_result = result
             st.session_state.pipeline_task_type = task_type.value
+            activity_view.render()
 
         except ResearchServiceError as exc:
             log_failure(logger, "pipeline_workflow", exc, task_type=task_type.value, provider=provider_selection)
@@ -328,55 +803,34 @@ def _render_pipeline_tab(provider_selection: str | None) -> None:
     st.markdown(current_result.get("final_output", ""))
     _render_export_buttons(current_result, TaskType(current_task_type))
 
+    metadata = current_result.get("metadata", {})
+    activity_log = metadata.get("activity_log") if isinstance(metadata, dict) else None
+    if isinstance(activity_log, list) and activity_log:
+        st.subheader("Workflow")
+        _render_workflow_activity(activity_log, task_type=TaskType(current_task_type))
+
     with st.expander("Debug metadata", expanded=False):
         st.json(current_result.get("metadata", {}))
 
 
-def _render_chat_tab(provider_selection: str | None) -> None:
+def _render_chat_tab(
+    provider_selection: str | None,
+    *,
+    uploaded_attachments: list[Any] | None = None,
+    pasted_context: str = "",
+) -> None:
     llm = LLMRouter()
     if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = []
-    if "chat_context" not in st.session_state:
-        st.session_state.chat_context = ""
 
-    st.caption("Optional: add document context first, then ask research questions conversationally.")
-    source_type = st.radio("Context source", options=["Upload PDF", "Paste text", "No context"], horizontal=True, key="chat_source")
-
-    uploaded_pdf = None
-    pasted_text = ""
-    if source_type == "Upload PDF":
-        uploaded_pdf = st.file_uploader("PDF file", type=["pdf"], key="chat_pdf")
-    elif source_type == "Paste text":
-        pasted_text = st.text_area("Paper text", height=180, placeholder="Paste text to use as context...", key="chat_text")
-
-    if st.button("Set/refresh context", key="chat_set_context"):
-        try:
-            if source_type == "No context":
-                st.session_state.chat_context = ""
-                st.success("Context cleared.")
-            else:
-                with st.spinner("Preparing context..."):
-                    st.session_state.chat_context = _ingest_document_context(
-                        source_type=source_type,
-                        uploaded_pdf=uploaded_pdf,
-                        pasted_text=pasted_text,
-                    )
-                st.success("Context loaded for chat.")
-        except DocumentServiceError as exc:
-            log_failure(logger, "chat_context_document", exc)
-            _show_error(_friendly_error(exc))
-        except Exception as exc:  # pragma: no cover
-            log_failure(logger, "chat_context_unexpected", exc)
-            _show_error(_friendly_error(exc, default="Failed to prepare context."))
-
-    if st.session_state.chat_context:
-        st.info("Document context is active for chat.")
+    if uploaded_attachments or pasted_context.strip():
+        st.caption("Attachments are active for the next reply.")
 
     for msg in st.session_state.chat_messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    user_message = st.chat_input("Ask anything about your topic or paper plan...")
+    user_message = st.chat_input("Message Cite Mind...")
     if not user_message:
         return
 
@@ -389,59 +843,92 @@ def _render_chat_tab(provider_selection: str | None) -> None:
         role = "User" if msg["role"] == "user" else "Assistant"
         history_lines.append(f"{role}: {msg['content']}")
 
-    context_block = st.session_state.chat_context
-    if context_block:
-        context_block = context_block[:12000]
+    with st.chat_message("assistant"):
+        activity_placeholder = st.empty()
+        completed_agents: list[str] = []
+        _render_chat_agent_activity(activity_placeholder, active="Orchestrator", completed=completed_agents)
 
-    search_results_markdown = ""
-    if _is_paper_search_request(user_message):
         try:
-            with st.spinner("Searching scholarly indexes..."):
+            if uploaded_attachments or pasted_context.strip():
+                _render_chat_agent_activity(activity_placeholder, active="Researcher", completed=completed_agents)
+            context_block = _build_attachment_context(uploaded_attachments, pasted_context)
+            if uploaded_attachments or pasted_context.strip():
+                completed_agents.append("Researcher")
+        except DocumentServiceError as exc:
+            log_failure(logger, "chat_attachment_document", exc)
+            _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents, failed="Researcher")
+            st.error(_friendly_error(exc))
+            return
+        except Exception as exc:  # pragma: no cover
+            log_failure(logger, "chat_attachment_unexpected", exc)
+            _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents, failed="Researcher")
+            st.error(_friendly_error(exc, default="Failed to read attachments."))
+            return
+
+        if context_block:
+            context_block = context_block[:12000]
+
+        search_results_markdown = ""
+        if _is_paper_search_request(user_message):
+            try:
+                _render_chat_agent_activity(activity_placeholder, active="Researcher", completed=completed_agents)
                 search_results = CitationLookup(timeout_seconds=10.0).search_papers(
                     _paper_search_query(user_message),
                     limit=5,
                 )
-            search_results_markdown = _format_paper_results(search_results)
-        except CitationLookupError as exc:
-            log_failure(logger, "paper_search", exc)
-            _show_error(f"Paper search failed: {_friendly_error(exc)}")
-            return
-        except Exception as exc:  # pragma: no cover
-            log_failure(logger, "paper_search_unexpected", exc)
-            _show_error(_friendly_error(exc, default="Paper search failed."))
-            return
+                search_results_markdown = _format_paper_results(search_results)
+                if "Researcher" not in completed_agents:
+                    completed_agents.append("Researcher")
+                _render_chat_agent_activity(activity_placeholder, active="Writer", completed=completed_agents)
+            except CitationLookupError as exc:
+                log_failure(logger, "paper_search", exc)
+                _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents, failed="Researcher")
+                st.error(f"Paper search failed: {_friendly_error(exc)}")
+                return
+            except Exception as exc:  # pragma: no cover
+                log_failure(logger, "paper_search_unexpected", exc)
+                _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents, failed="Researcher")
+                st.error(_friendly_error(exc, default="Paper search failed."))
+                return
 
-        with st.chat_message("assistant"):
+            completed_agents.extend(["Writer", "Orchestrator"])
+            _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents)
             st.markdown(search_results_markdown)
-        st.session_state.chat_messages.append({"role": "assistant", "content": search_results_markdown})
-        return
+            st.session_state.chat_messages.append({"role": "assistant", "content": search_results_markdown})
+            return
 
-    prompt = (
-        f"{CHAT_SYSTEM_PROMPT}\n\n"
-        "When scholarly search results are provided, use only those results as found papers. "
-        "Do not invent paper titles, authors, quotes, links, or methodologies. If methodology details are "
-        "not visible in the title or abstract, say that the full text must be checked.\n\n"
-        f"Conversation so far:\n{chr(10).join(history_lines)}\n\n"
-        f"Document context (may be empty):\n{context_block}\n\n"
-        f"Scholarly search results (may be empty):\n{search_results_markdown}\n\n"
-        f"Now answer the latest user message thoroughly and practically."
-    )
+        prompt = (
+            f"{CHAT_SYSTEM_PROMPT}\n\n"
+            "When scholarly search results are provided, use only those results as found papers. "
+            "Do not invent paper titles, authors, quotes, links, or methodologies. If methodology details are "
+            "not visible in the title or abstract, say that the full text must be checked.\n\n"
+            f"Conversation so far:\n{chr(10).join(history_lines)}\n\n"
+            f"Attachment context (may be empty):\n{context_block}\n\n"
+            f"Scholarly search results (may be empty):\n{search_results_markdown}\n\n"
+            f"Now answer the latest user message thoroughly and practically."
+        )
 
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            try:
-                answer = llm.generate(prompt=prompt, provider=provider_selection)
-            except Exception as exc:
-                log_failure(logger, "chat_llm", exc, provider=provider_selection)
-                if search_results_markdown:
-                    answer = (
-                        search_results_markdown
-                        + "\n\n"
-                        + _format_llm_failure(provider_selection, exc)
-                    )
-                else:
-                    _show_error(_friendly_error(exc, default=_format_llm_failure(provider_selection, exc)))
-                    return
+        _render_chat_agent_activity(activity_placeholder, active="Critic", completed=completed_agents)
+        completed_agents.append("Critic")
+        _render_chat_agent_activity(activity_placeholder, active="Writer", completed=completed_agents)
+        try:
+            answer = llm.generate(prompt=prompt, provider=provider_selection)
+        except Exception as exc:
+            log_failure(logger, "chat_llm", exc, provider=provider_selection)
+            if search_results_markdown:
+                answer = (
+                    search_results_markdown
+                    + "\n\n"
+                    + _format_llm_failure(provider_selection, exc)
+                )
+            else:
+                answer = _friendly_error(exc, default=_format_llm_failure(provider_selection, exc))
+                _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents, failed="Writer")
+                st.error(answer)
+                st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+                return
+        completed_agents.extend(["Writer", "Orchestrator"])
+        _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents)
         st.markdown(answer)
 
     st.session_state.chat_messages.append({"role": "assistant", "content": answer})
@@ -580,31 +1067,44 @@ def _split_pasted_papers(value: str) -> list[str]:
 
 
 def render() -> None:
-    st.set_page_config(page_title=f"{settings.app_name} MVP", layout="wide")
-    st.title(f"{settings.app_name} MVP")
+    st.set_page_config(page_title=settings.app_name, layout="wide")
+    st.title(settings.app_name)
 
     configured_providers = _configured_providers()
     provider_selection: str | None = None
-    if configured_providers:
-        label_map = {_provider_label(p): p for p in configured_providers}
-        selected_label = st.selectbox("LLM provider", options=list(label_map.keys()))
-        provider_selection = label_map[selected_label]
-    else:
-        st.info(
-            "No remote LLM providers are fully configured. The app can still try the default local provider, "
-            "but workflows may fail until provider settings are available."
+    with st.sidebar:
+        st.subheader("Model")
+        if configured_providers:
+            label_map = {_provider_label(p): p for p in configured_providers}
+            selected_label = st.selectbox("LLM provider", options=list(label_map.keys()), label_visibility="collapsed")
+            provider_selection = label_map[selected_label]
+        else:
+            st.info(
+                "No configured provider was found. The app can still try the default local provider."
+            )
+
+        st.subheader("Attachments")
+        uploaded_attachments = st.file_uploader(
+            "Add files",
+            type=["pdf", "txt", "md"],
+            accept_multiple_files=True,
+            label_visibility="collapsed",
+        )
+        pasted_context = st.text_area(
+            "Paste optional context",
+            height=140,
+            placeholder="Optional context...",
         )
 
-    tab_pipeline, tab_chat, tab_rag = st.tabs(["Pipeline", "Chat", "Cross-paper RAG"])
-    with tab_pipeline:
-        st.caption("Upload a PDF or paste text, then run the multi-agent workflow.")
-        _render_pipeline_tab(provider_selection)
+        if st.button("Clear chat", use_container_width=True):
+            st.session_state.chat_messages = []
+            st.rerun()
 
-    with tab_chat:
-        _render_chat_tab(provider_selection)
-
-    with tab_rag:
-        _render_rag_tab(provider_selection)
+    _render_chat_tab(
+        provider_selection,
+        uploaded_attachments=uploaded_attachments,
+        pasted_context=pasted_context,
+    )
 
 
 if __name__ == "__main__":
