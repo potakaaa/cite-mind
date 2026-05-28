@@ -10,7 +10,7 @@ import requests
 
 from config import settings
 
-from .base_provider import BaseLLMProvider, LLMProviderError
+from .base_provider import BaseLLMProvider, LLMProviderError, LLMResponse
 
 
 class OllamaProvider(BaseLLMProvider):
@@ -19,7 +19,7 @@ class OllamaProvider(BaseLLMProvider):
         retries = retries if retries is not None else settings.ollama_retries
         super().__init__(provider_name="ollama", timeout=timeout, retries=retries)
 
-    def generate(self, prompt: str, **kwargs: Any) -> str:
+    def generate(self, prompt: str, **kwargs: Any) -> LLMResponse:
         settings.validate_provider_config("ollama")
 
         model = kwargs.get("model", settings.ollama_model)
@@ -38,7 +38,7 @@ class OllamaProvider(BaseLLMProvider):
         if not text:
             raise LLMProviderError("Ollama returned an empty response.")
 
-        return self._normalize_text(text)
+        return LLMResponse(text=self._normalize_text(text))
 
     def _stream_generate(self, url: str, payload: dict[str, Any]) -> str:
         """Call Ollama in streaming mode to avoid idle read timeouts on slow local models."""

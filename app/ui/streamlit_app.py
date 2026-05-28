@@ -17,7 +17,7 @@ from app.rag import RAGDisabledError, RAGPipeline
 from app.services.document_service import DocumentService, DocumentServiceError
 from app.services.export_service import ExportService, ExportServiceError
 from app.services.research_service import ResearchService, ResearchServiceError
-from app.tools.citation_lookup import CitationLookup, CitationLookupError, PaperSearchResult
+from app.schemas.study_schema import StudySchema
 from app.utils.logging import (
     ActivityLogEntry,
     WorkflowActivityLogger,
@@ -72,83 +72,6 @@ def _friendly_error(exc: Exception, default: str = "The request could not be com
             f"Details: {detail}"
         )
     return f"{default} Details: {detail}"
-
-
-def _is_paper_search_request(message: str) -> bool:
-    text = message.lower()
-    asks_for_search = any(token in text for token in ("search", "find", "look for", "existing papers", "studies"))
-    scholarly_target = any(token in text for token in ("paper", "papers", "study", "studies", "literature", "methodolog"))
-    return asks_for_search and scholarly_target
-
-
-def _paper_search_query(message: str) -> str:
-    query = re.sub(
-        r"\b(can you|could you|please|search|find|look for|existing|papers?|studies|and|their|methodolog(?:y|ies)|about|on|for)\b",
-        " ",
-        message,
-        flags=re.IGNORECASE,
-    )
-    query = re.sub(r"[^A-Za-z0-9\s:/().,-]", " ", query)
-    query = re.sub(r"\s+", " ", query).strip(" ?.,")
-    return query or message.strip()
-
-
-def _format_paper_results(results: list[PaperSearchResult]) -> str:
-    lines = ["### Existing papers found"]
-    for index, paper in enumerate(results, start=1):
-        authors = ", ".join(paper.authors[:3])
-        if len(paper.authors) > 3:
-            authors += " et al."
-        details = " | ".join(
-            part
-            for part in [
-                str(paper.year) if paper.year else None,
-                authors or None,
-                paper.venue,
-                f"DOI: {paper.doi}" if paper.doi else None,
-            ]
-            if part
-        )
-        lines.append(f"{index}. **{paper.title}**")
-        if details:
-            lines.append(f"   {details}")
-        if paper.url:
-            lines.append(f"   {paper.url}")
-        if paper.abstract:
-            abstract = paper.abstract.strip()
-            if len(abstract) > 500:
-                abstract = abstract[:497].rstrip() + "..."
-            lines.append(f"   Abstract: {abstract}")
-            methodology = _methodology_clue(abstract)
-            if methodology:
-                lines.append(f"   Methodology clue: {methodology}")
-        else:
-            lines.append("   Methodology clue: Not available in the search metadata; check the full text.")
-    return "\n".join(lines)
-
-
-def _methodology_clue(text: str) -> str | None:
-    keywords = (
-        "method",
-        "model",
-        "survey",
-        "interview",
-        "case study",
-        "optimization",
-        "algorithm",
-        "simulation",
-        "regression",
-        "analysis",
-        "framework",
-        "experiment",
-        "data",
-    )
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
-    for sentence in sentences:
-        if any(keyword in sentence.lower() for keyword in keywords):
-            clue = sentence.strip()
-            return clue[:297].rstrip() + "..." if len(clue) > 300 else clue
-    return None
 
 
 def _format_llm_failure(provider: str | None, exc: Exception) -> str:
@@ -868,43 +791,12 @@ def _render_chat_tab(
         if context_block:
             context_block = context_block[:12000]
 
-        search_results_markdown = ""
-        if _is_paper_search_request(user_message):
-            try:
-                _render_chat_agent_activity(activity_placeholder, active="Researcher", completed=completed_agents)
-                search_results = CitationLookup(timeout_seconds=10.0).search_papers(
-                    _paper_search_query(user_message),
-                    limit=5,
-                )
-                search_results_markdown = _format_paper_results(search_results)
-                if "Researcher" not in completed_agents:
-                    completed_agents.append("Researcher")
-                _render_chat_agent_activity(activity_placeholder, active="Writer", completed=completed_agents)
-            except CitationLookupError as exc:
-                log_failure(logger, "paper_search", exc)
-                _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents, failed="Researcher")
-                st.error(f"Paper search failed: {_friendly_error(exc)}")
-                return
-            except Exception as exc:  # pragma: no cover
-                log_failure(logger, "paper_search_unexpected", exc)
-                _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents, failed="Researcher")
-                st.error(_friendly_error(exc, default="Paper search failed."))
-                return
-
-            completed_agents.extend(["Writer", "Orchestrator"])
-            _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents)
-            st.markdown(search_results_markdown)
-            st.session_state.chat_messages.append({"role": "assistant", "content": search_results_markdown})
-            return
-
         prompt = (
             f"{CHAT_SYSTEM_PROMPT}\n\n"
-            "When scholarly search results are provided, use only those results as found papers. "
-            "Do not invent paper titles, authors, quotes, links, or methodologies. If methodology details are "
-            "not visible in the title or abstract, say that the full text must be checked.\n\n"
+            "You have access to AcademicSearch and WebSearch tools. Use them to find papers or articles if the user asks for recent research, news, or general information. "
+            "Do not invent paper titles, authors, quotes, links, or methodologies.\n\n"
             f"Conversation so far:\n{chr(10).join(history_lines)}\n\n"
             f"Attachment context (may be empty):\n{context_block}\n\n"
-            f"Scholarly search results (may be empty):\n{search_results_markdown}\n\n"
             f"Now answer the latest user message thoroughly and practically."
         )
 
@@ -912,21 +804,16 @@ def _render_chat_tab(
         completed_agents.append("Critic")
         _render_chat_agent_activity(activity_placeholder, active="Writer", completed=completed_agents)
         try:
-            answer = llm.generate(prompt=prompt, provider=provider_selection)
+            chat_agent = ChatAgent()
+            answer = chat_agent.run(prompt=prompt, provider=provider_selection)
         except Exception as exc:
-            log_failure(logger, "chat_llm", exc, provider=provider_selection)
-            if search_results_markdown:
-                answer = (
-                    search_results_markdown
-                    + "\n\n"
-                    + _format_llm_failure(provider_selection, exc)
-                )
-            else:
-                answer = _friendly_error(exc, default=_format_llm_failure(provider_selection, exc))
-                _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents, failed="Writer")
-                st.error(answer)
-                st.session_state.chat_messages.append({"role": "assistant", "content": answer})
-                return
+            log_failure(logger, "chat_agent", exc, provider=provider_selection)
+            answer = _friendly_error(exc, default=_format_llm_failure(provider_selection, exc))
+            _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents, failed="Writer")
+            st.error(answer)
+            st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+            return
+        
         completed_agents.extend(["Writer", "Orchestrator"])
         _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents)
         st.markdown(answer)

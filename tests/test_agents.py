@@ -10,16 +10,20 @@ from app.schemas.agent_output_schema import CritiqueSchema
 from app.schemas.study_schema import StudySchema
 
 
+from app.llm.base_provider import LLMResponse
+
 class MockLLM:
     def __init__(self, responses: list[str]) -> None:
         self.responses = list(responses)
         self.calls: list[dict] = []
 
-    def generate(self, prompt: str, provider=None, task_type=None):
+    def generate(self, prompt: str, **kwargs):
+        provider = kwargs.get("provider")
+        task_type = kwargs.get("task_type")
         self.calls.append({"prompt": prompt, "provider": provider, "task_type": task_type})
         if not self.responses:
             raise RuntimeError("No mocked LLM response left")
-        return self.responses.pop(0)
+        return LLMResponse(text=self.responses.pop(0))
 
 
 STUDY_JSON = (

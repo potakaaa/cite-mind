@@ -5,12 +5,26 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 import time
 from typing import Any
+from dataclasses import dataclass, field
 
 import requests
 
 
 class LLMProviderError(RuntimeError):
     """Raised when an LLM provider call fails."""
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass
+class LLMResponse:
+    text: str
+    tool_calls: list[ToolCall] = field(default_factory=list)
 
 
 class BaseLLMProvider(ABC):
@@ -24,8 +38,8 @@ class BaseLLMProvider(ABC):
         self.retries = retries
 
     @abstractmethod
-    def generate(self, prompt: str, **kwargs: Any) -> str:
-        """Generate a text response for the given prompt."""
+    def generate(self, prompt: str, **kwargs: Any) -> LLMResponse:
+        """Generate a response for the given prompt."""
 
     def _normalize_text(self, text: Any) -> str:
         """Normalize provider responses into a consistent text output."""

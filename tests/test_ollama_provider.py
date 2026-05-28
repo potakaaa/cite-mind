@@ -37,7 +37,7 @@ def test_ollama_provider_accumulates_streaming_chunks(monkeypatch):
 
     result = OllamaProvider(timeout=3, retries=0).generate("prompt")
 
-    assert result == "hello world"
+    assert result.text == "hello world"
     assert captured["stream"] is True
     assert captured["json"]["stream"] is True
 
