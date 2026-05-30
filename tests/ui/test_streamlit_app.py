@@ -1,32 +1,59 @@
 from __future__ import annotations
 
-from app.tools.citation_lookup import PaperSearchResult
-from app.ui.streamlit_app import _format_paper_results, _is_paper_search_request, _paper_search_query
+from types import SimpleNamespace
+
+from app.ui import streamlit_app
+from app.ui.streamlit_app import _finish_chat_response, _friendly_error, _render_chat_agent_activity
+from app.services.research_service import ResearchServiceError
 
 
-def test_detects_paper_search_request_and_extracts_topic():
-    message = "can you search for existing papers and their methodologies on public transport route optimization?"
-
-    assert _is_paper_search_request(message)
-    assert _paper_search_query(message) == "public transport route optimization"
-
-
-def test_ignores_general_chat_without_scholarly_target():
-    assert not _is_paper_search_request("can you explain this paragraph?")
+def test_friendly_error_formats_properly():
+    exc = ValueError("Something bad happened.")
+    formatted = _friendly_error(exc)
+    assert "The request could not be completed." in formatted
+    assert "Something bad happened." in formatted
 
 
-def test_formats_papers_with_methodology_clues():
-    markdown = _format_paper_results(
-        [
-            PaperSearchResult(
-                title="Route Zoning Study",
-                authors=["Ada Lovelace"],
-                year=2024,
-                abstract="This case study uses survey data and optimization analysis for route design.",
-            )
-        ]
+def test_friendly_error_returns_clean_service_errors():
+    exc = ResearchServiceError("Please provide at least 80 characters of paper text.")
+    formatted = _friendly_error(exc)
+    assert formatted == "Please provide at least 80 characters of paper text."
+
+
+def test_finish_chat_response_clears_activity_and_persists_once(monkeypatch):
+    class Placeholder:
+        cleared = False
+
+        def empty(self):
+            self.cleared = True
+
+    placeholder = Placeholder()
+    rerun_calls = []
+    fake_st = SimpleNamespace(
+        session_state=SimpleNamespace(chat_messages=[]),
+        rerun=lambda: rerun_calls.append(True),
     )
+    monkeypatch.setattr(streamlit_app, "st", fake_st)
 
-    assert "Existing papers found" in markdown
-    assert "Route Zoning Study" in markdown
-    assert "Methodology clue" in markdown
+    _finish_chat_response(placeholder, "Final answer")
+
+    assert placeholder.cleared is True
+    assert fake_st.session_state.chat_messages == [{"role": "assistant", "content": "Final answer"}]
+    assert rerun_calls == [True]
+
+
+def test_render_chat_agent_activity_clears_when_work_is_complete():
+    class Placeholder:
+        cleared = False
+
+        def empty(self):
+            self.cleared = True
+
+        def markdown(self, *_args, **_kwargs):
+            raise AssertionError("completed activity should not render another status")
+
+    placeholder = Placeholder()
+
+    _render_chat_agent_activity(placeholder, active="")
+
+    assert placeholder.cleared is True

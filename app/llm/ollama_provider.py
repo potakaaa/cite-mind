@@ -10,7 +10,8 @@ import requests
 
 from config import settings
 
-from .base_provider import BaseLLMProvider, LLMProviderError
+from .base_provider import BaseLLMProvider, LLMProviderError, LLMResponse, ToolCall
+from app.tools.base import BaseTool
 
 
 class OllamaProvider(BaseLLMProvider):
@@ -19,13 +20,64 @@ class OllamaProvider(BaseLLMProvider):
         retries = retries if retries is not None else settings.ollama_retries
         super().__init__(provider_name="ollama", timeout=timeout, retries=retries)
 
-    def generate(self, prompt: str, **kwargs: Any) -> str:
+    def generate(self, prompt: str, **kwargs: Any) -> LLMResponse:
         settings.validate_provider_config("ollama")
 
         model = kwargs.get("model", settings.ollama_model)
         temperature = kwargs.get("temperature", 0.2)
         base_url = settings.ollama_base_url.rstrip("/")
+        tools: list[BaseTool] | None = kwargs.get("tools")
+        messages: list[dict[str, Any]] | None = kwargs.get("messages")
 
+        # If tools or messages are provided, use the /api/chat endpoint
+        if tools or messages:
+            url = f"{base_url}/api/chat"
+            contents = messages if messages else [{"role": "user", "content": prompt}]
+            payload = {
+                "model": model,
+                "messages": contents,
+                "stream": False,
+                "options": {"temperature": temperature},
+            }
+            if tools:
+                payload["tools"] = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": t.name,
+                            "description": t.description,
+                            "parameters": t.parameters_schema
+                        }
+                    }
+                    for t in tools
+                ]
+            import logging
+            logging.getLogger("app.llm.ollama").debug(f"Ollama chat payload: {json.dumps(payload)}")
+            data = self._post_json(url=url, payload=payload)
+            message = data.get("message", {})
+            text = message.get("content") or ""
+            
+            tool_calls = []
+            if "tool_calls" in message:
+                for tc in message["tool_calls"]:
+                    func = tc.get("function", {})
+                    args = func.get("arguments", {})
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+                    tool_calls.append(
+                        ToolCall(
+                            id=tc.get("id", func.get("name")),
+                            name=func.get("name"),
+                            arguments=args
+                        )
+                    )
+                    
+            return LLMResponse(text=self._normalize_text(text), tool_calls=tool_calls)
+
+        # Fallback to streaming /api/generate for standard text requests
         url = f"{base_url}/api/generate"
         payload = {
             "model": model,
@@ -38,7 +90,7 @@ class OllamaProvider(BaseLLMProvider):
         if not text:
             raise LLMProviderError("Ollama returned an empty response.")
 
-        return self._normalize_text(text)
+        return LLMResponse(text=self._normalize_text(text))
 
     def _stream_generate(self, url: str, payload: dict[str, Any]) -> str:
         """Call Ollama in streaming mode to avoid idle read timeouts on slow local models."""

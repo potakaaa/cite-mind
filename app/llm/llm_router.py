@@ -7,7 +7,7 @@ from typing import Any
 from config import LlmProvider, settings
 from app.utils.logging import get_logger, log_failure
 
-from .base_provider import BaseLLMProvider, LLMProviderError
+from .base_provider import BaseLLMProvider, LLMProviderError, LLMResponse
 from .gemini_provider import GeminiProvider
 from .ollama_provider import OllamaProvider
 from .openrouter_provider import OpenRouterProvider
@@ -88,7 +88,7 @@ class LLMRouter:
         provider: LlmProvider | None = None,
         task_type: str | None = None,
         **kwargs: Any,
-    ) -> str:
+    ) -> LLMResponse:
         selected = self._select_provider(provider=provider, task_type=task_type)
         llm = self.providers[selected]
 

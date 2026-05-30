@@ -159,7 +159,7 @@ class ResearchReaderAgent(BaseAgent):
                 self.logger.info("Agent '%s' processing chunk %s/%s", self.name, chunk_index, len(chunks))
                 prompt = self.build_prompt(phase="extract", paper_text=chunk_text)
                 raw = self.llm.generate(prompt=prompt, provider=provider, task_type=task_type)
-                partial = self.handle_response(raw)
+                partial = self.handle_response(raw.text)
                 partials.append(partial.model_dump())
 
             if len(partials) == 1:
@@ -167,7 +167,7 @@ class ResearchReaderAgent(BaseAgent):
             else:
                 merge_prompt = self.build_prompt(phase="merge", partials=partials)
                 merged_raw = self.llm.generate(prompt=merge_prompt, provider=provider, task_type=task_type)
-                result = self.handle_response(merged_raw)
+                result = self.handle_response(merged_raw.text)
 
             self.logger.info("Agent '%s' finished", self.name)
             return result
