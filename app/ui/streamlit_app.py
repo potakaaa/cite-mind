@@ -609,8 +609,8 @@ def _render_chat_agent_activity(
         message = active_messages.get(active, f"{active} is working")
         state_class = "running"
     else:
-        message = "Orchestrator is wrapping up"
-        state_class = "running"
+        placeholder.empty()
+        return
 
     status_class = escape(state_class)
     status_message = escape(message)
@@ -652,6 +652,13 @@ def _render_chat_agent_activity(
         """,
         unsafe_allow_html=True,
     )
+
+
+def _finish_chat_response(activity_placeholder: Any, answer: str) -> None:
+    """Persist a completed reply and redraw the chat from its canonical history."""
+    activity_placeholder.empty()
+    st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+    st.rerun()
 
 
 def _render_pipeline_tab(provider_selection: str | None) -> None:
@@ -821,10 +828,7 @@ def _render_chat_tab(
             return
         
         completed_agents.extend(["Writer", "Orchestrator"])
-        _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents)
-        st.markdown(answer)
-
-    st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+        _finish_chat_response(activity_placeholder, answer)
 
 
 def _render_rag_tab(provider_selection: str | None) -> None:
