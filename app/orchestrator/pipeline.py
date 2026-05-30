@@ -21,7 +21,7 @@ class PipelineDefinition:
     """Ordered steps and writer mode for a task pipeline."""
 
     name: str
-    task_type: TaskType
+    task_type: TaskType | None
     writer_mode: str
     steps: tuple[PipelineStep, ...]
 
@@ -39,12 +39,11 @@ def _build_writer_input(ctx: dict) -> dict:
         "mode": ctx["writer_mode"],
         "study": ctx["study"],
         "critique": ctx.get("critique"),
+        "user_prompt": ctx.get("user_prompt"),
     }
 
 
-def get_pipeline_map() -> dict[str, PipelineDefinition]:
-    """Return all fixed MVP pipelines."""
-
+def _common_steps() -> tuple[PipelineStep, PipelineStep, PipelineStep]:
     research = PipelineStep(
         name="research_reader",
         agent_key="research_reader",
@@ -64,29 +63,54 @@ def get_pipeline_map() -> dict[str, PipelineDefinition]:
         output_key="final_output",
     )
 
+    return research, critic, writer
+
+
+def build_pipeline(
+    *,
+    name: str,
+    writer_mode: str,
+    include_critic: bool,
+    task_type: TaskType | None = None,
+) -> PipelineDefinition:
+    """Build a pipeline from selected capabilities."""
+
+    research, critic, writer = _common_steps()
+    steps = (research, critic, writer) if include_critic else (research, writer)
+    return PipelineDefinition(
+        name=name,
+        task_type=task_type,
+        writer_mode=writer_mode,
+        steps=steps,
+    )
+
+
+def get_pipeline_map() -> dict[str, PipelineDefinition]:
+    """Return all fixed MVP pipelines."""
+
     return {
-        "study_table": PipelineDefinition(
+        "study_table": build_pipeline(
             name="study_table",
             task_type=TaskType.STUDY_TABLE,
             writer_mode="study_table",
-            steps=(research, writer),
+            include_critic=False,
         ),
-        "study_table_with_gaps": PipelineDefinition(
+        "study_table_with_gaps": build_pipeline(
             name="study_table_with_gaps",
             task_type=TaskType.STUDY_TABLE_WITH_GAPS,
             writer_mode="gaps",
-            steps=(research, critic, writer),
+            include_critic=True,
         ),
-        "paper_summary": PipelineDefinition(
+        "paper_summary": build_pipeline(
             name="paper_summary",
             task_type=TaskType.PAPER_SUMMARY,
             writer_mode="summary",
-            steps=(research, writer),
+            include_critic=False,
         ),
-        "full_report": PipelineDefinition(
+        "full_report": build_pipeline(
             name="full_report",
             task_type=TaskType.FULL_REPORT,
             writer_mode="full_report",
-            steps=(research, critic, writer),
+            include_critic=True,
         ),
     }

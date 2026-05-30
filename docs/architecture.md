@@ -45,9 +45,9 @@ Core settings include:
 
 The orchestrator lives in `app/orchestrator/`.
 
-- `TaskType` defines supported workflows.
-- `TaskRouter` maps each task type to a pipeline name.
-- `pipeline.py` defines fixed ordered pipeline steps.
+- `TaskType` defines supported workflows, including `chat` for prompt-driven routing.
+- `TaskRouter` maps explicit task types to pipeline names, or infers a chat route from the user's prompt and attachment metadata.
+- `pipeline.py` defines reusable pipeline steps and can build dynamic chat pipelines.
 - `Orchestrator` executes each step, stores intermediate outputs in context, and returns a `TaskResult`.
 
 Supported task routes:
@@ -58,6 +58,7 @@ Supported task routes:
 | `study_table_with_gaps` | `study_table_with_gaps` | research reader -> critic -> writer | `gaps` |
 | `paper_summary` | `paper_summary` | research reader -> writer | `summary` |
 | `full_report` | `full_report` | research reader -> critic -> writer | `full_report` |
+| `chat` | inferred, for example `chat_summary` or `chat_gaps_with_critic` | inferred from prompt/attachments | inferred |
 
 Each pipeline step records metadata: step name, agent name, status, duration, output keys, and error details when execution fails.
 

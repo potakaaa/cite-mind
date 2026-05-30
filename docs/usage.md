@@ -144,7 +144,16 @@ Based on the loaded paper, what are the main methodological limitations?
 What related evaluation metrics should I consider for this study design?
 ```
 
-The chat prompt includes recent conversation history and up to 12,000 characters of active document context.
+When active document context is long enough for a research workflow, chat requests are routed through the orchestrator automatically. The router chooses the writer mode and whether to include the critic from the latest prompt and attachment metadata:
+
+| Prompt intent | Agent sequence | Writer mode |
+| --- | --- | --- |
+| Table, comparison, or study characteristics | research reader -> writer | `study_table` |
+| Summary, overview, or explanation | research reader -> writer | `summary` |
+| Gaps, limitations, critique, or recommendations | research reader -> critic -> writer | `gaps` |
+| Full report, detailed report, RRL, or literature review | research reader -> critic -> writer | `full_report` |
+
+Short general chat without enough document context still uses the conversational LLM path. The chat prompt includes recent conversation history and up to 12,000 characters of active document context.
 
 ## Programmatic Usage
 
@@ -156,7 +165,8 @@ from app.services.research_service import ResearchService
 
 service = ResearchService()
 result = service.run(
-    task_type=TaskType.PAPER_SUMMARY,
+    task_type=TaskType.CHAT,
+    user_prompt="Summarize this paper and identify any limitations.",
     raw_text="Paste paper text here...",
     provider="ollama",
     include_metadata=True,

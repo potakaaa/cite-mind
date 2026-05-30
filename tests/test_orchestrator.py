@@ -75,3 +75,23 @@ def test_orchestrator_stops_before_writer_when_middle_agent_fails():
         orchestrator.run(TaskInput(task_type=TaskType.FULL_REPORT, paper_text="paper"))
 
     assert calls == ["research_reader_agent", "critic_agent"]
+
+
+def test_chat_workflow_routes_attachment_summary_without_critic():
+    orchestrator, calls, research, critic, writer = build_recording_orchestrator()
+
+    result = orchestrator.run(
+        TaskInput(
+            task_type=TaskType.CHAT,
+            user_prompt="can you explain this attachment?",
+            paper_text="paper",
+            provider="mock",
+            metadata={"attachment_count": 1},
+        )
+    )
+
+    assert calls == ["research_reader_agent", "writer_agent"]
+    assert writer.kwargs[0]["mode"] == "summary"
+    assert writer.kwargs[0]["user_prompt"] == "can you explain this attachment?"
+    assert critic.kwargs == []
+    assert result.intermediate["pipeline"] == "chat_summary"

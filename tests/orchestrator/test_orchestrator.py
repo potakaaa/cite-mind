@@ -171,3 +171,37 @@ def test_debug_metadata_contains_pipeline_info_and_study_dump():
     assert result.intermediate["input_metadata"] == {"trace_id": "123"}
     assert result.intermediate["study"]["title"] == "Study"
     assert result.steps[0].duration_ms >= 0
+
+
+@pytest.mark.parametrize(
+    "prompt,expected_steps,expected_mode,expects_critique",
+    [
+        ("make a study table from this attachment", ["research_reader", "writer"], "study_table", False),
+        ("summarize this paper", ["research_reader", "writer"], "summary", False),
+        ("identify gaps and recommendations", ["research_reader", "critic", "writer"], "gaps", True),
+        ("write a full report", ["research_reader", "critic", "writer"], "full_report", True),
+    ],
+)
+def test_chat_task_infers_pipeline_from_prompt(
+    prompt,
+    expected_steps,
+    expected_mode,
+    expects_critique,
+):
+    writer = StubWriter()
+    orchestrator = build_orchestrator(writer=writer)
+
+    result = orchestrator.run(
+        TaskInput(
+            task_type=TaskType.CHAT,
+            user_prompt=prompt,
+            paper_text="sample paper",
+            metadata={"attachment_count": 1},
+        )
+    )
+
+    assert [s.step_name for s in result.steps] == expected_steps
+    assert result.final_output == f"mode={expected_mode};critique={expects_critique}"
+    assert writer.calls[0]["user_prompt"] == prompt
+    assert result.intermediate["writer_mode"] == expected_mode
+    assert result.intermediate["route_reason"]

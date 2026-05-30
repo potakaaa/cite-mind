@@ -7,7 +7,7 @@ from app.agents.base_agent import AgentExecutionError
 from app.agents.critic_agent import CriticAgent
 from app.agents.research_reader_agent import ResearchReaderAgent
 from app.agents.writer_agent import WriterAgent
-from app.orchestrator.pipeline import PipelineDefinition, get_pipeline_map
+from app.orchestrator.pipeline import PipelineDefinition, build_pipeline, get_pipeline_map
 from app.orchestrator.task_router import TaskRouter, UnsupportedTaskTypeError
 from app.orchestrator.task_schema import StepMeta, TaskInput, TaskResult, TaskType
 from app.utils.logging import WorkflowActivityLogger, get_logger, log_failure
@@ -45,8 +45,15 @@ class Orchestrator:
             log_failure(self.logger, "task_input_validation", exc)
             raise
 
-        route = self.router.route(task_input.task_type)
+        route = self.router.route(task_input)
         pipeline = self.pipelines.get(route.pipeline_name)
+        if pipeline is None and route.writer_mode and route.include_critic is not None:
+            pipeline = build_pipeline(
+                name=route.pipeline_name,
+                writer_mode=route.writer_mode,
+                include_critic=route.include_critic,
+                task_type=route.task_type,
+            )
         if pipeline is None:
             exc = UnsupportedTaskTypeError(
                 f"No pipeline configured for route '{route.pipeline_name}'"
@@ -54,12 +61,18 @@ class Orchestrator:
             log_failure(self.logger, "pipeline_route_validation", exc, route=route.pipeline_name)
             raise exc
 
-        return self._execute_pipeline(task_input=task_input, pipeline=pipeline)
+        return self._execute_pipeline(task_input=task_input, pipeline=pipeline, route_reason=route.reason)
 
-    def _execute_pipeline(self, task_input: TaskInput, pipeline: PipelineDefinition) -> TaskResult:
+    def _execute_pipeline(
+        self,
+        task_input: TaskInput,
+        pipeline: PipelineDefinition,
+        route_reason: str | None = None,
+    ) -> TaskResult:
         pipeline_start = time.perf_counter()
         context: dict[str, Any] = {
             "paper_text": task_input.paper_text,
+            "user_prompt": task_input.user_prompt or task_input.metadata.get("user_prompt"),
             "writer_mode": pipeline.writer_mode,
             "task_type": task_input.task_type.value,
             "user_metadata": dict(task_input.metadata),
@@ -169,6 +182,7 @@ class Orchestrator:
 
         intermediate["pipeline"] = pipeline.name
         intermediate["writer_mode"] = pipeline.writer_mode
+        intermediate["route_reason"] = route_reason
         intermediate["input_metadata"] = dict(task_input.metadata)
 
         if self.activity_logger is not None:

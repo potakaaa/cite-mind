@@ -49,10 +49,19 @@ class WriterAgent(BaseAgent):
 
         study_json = json.dumps(study_schema.model_dump(), ensure_ascii=True)
         critique_json = json.dumps(critique_schema.model_dump(), ensure_ascii=True) if critique_schema else "null"
+        user_prompt = str(kwargs.get("user_prompt") or "").strip()
+        user_prompt_block = (
+            "User's latest request:\n"
+            f"{user_prompt}\n\n"
+            "Adapt the selected output mode to this request while staying within the provided evidence.\n\n"
+            if user_prompt
+            else ""
+        )
 
         return (
             f"{self.prompt_template}\n\n"
             f"Selected output mode: {mode}\n"
+            f"{user_prompt_block}"
             "Task:\n"
             "- Produce markdown that matches the selected output mode.\n"
             "- Ground every statement in provided data.\n"

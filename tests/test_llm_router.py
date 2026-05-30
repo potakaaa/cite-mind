@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from config import settings
 from app.llm.base_provider import LLMProviderError
 from app.llm.llm_router import LLMRouter
 
@@ -58,6 +59,17 @@ def test_llm_router_wraps_unexpected_provider_errors_but_preserves_provider_erro
     router.providers["ollama"] = FakeProvider(error=LLMProviderError("provider failed"))
     with pytest.raises(LLMProviderError, match="provider failed"):
         router.generate("prompt", provider="ollama")
+
+
+def test_llm_router_falls_back_when_default_provider_fails_at_runtime(monkeypatch):
+    router = build_router()
+    router.providers["ollama"] = FakeProvider(error=LLMProviderError("ollama unavailable"))
+    monkeypatch.setattr(type(settings), "validate_provider_config", lambda self, provider=None: None)
+
+    result = router.generate("prompt")
+
+    assert result == "gemini-response"
+    assert router.providers["gemini"].calls == [("prompt", {})]
 
 
 def test_llm_router_rejects_unknown_provider():

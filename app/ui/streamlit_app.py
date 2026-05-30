@@ -94,6 +94,12 @@ def _configured_providers() -> list[str]:
     return list(LLMRouter().configured_providers())
 
 
+def _call_provider(provider: str | None) -> str | None:
+    if provider and provider != settings.default_llm_provider:
+        return provider
+    return None
+
+
 def _provider_label(provider: str) -> str:
     if provider == settings.default_llm_provider:
         return f"{provider} (default)"
@@ -710,7 +716,7 @@ def _render_pipeline_tab(provider_selection: str | None) -> None:
                 result = _run_workflow(
                     service=service,
                     task_type=task_type,
-                    provider=provider_selection,
+                    provider=_call_provider(provider_selection),
                     raw_text=raw_text_input,
                     pdf_bytes=pdf_bytes,
                     pdf_filename=pdf_filename,
@@ -927,7 +933,7 @@ def _render_rag_tab(provider_selection: str | None) -> None:
             with st.spinner("Retrieving relevant chunks and answering..."):
                 st.session_state.rag_answer = pipeline.ask(
                     question,
-                    provider=provider_selection,
+                    provider=_call_provider(provider_selection),
                     top_k=int(top_k),
                 )
         except RAGDisabledError as exc:
