@@ -131,17 +131,17 @@ class CitationLookup:
             "Title lookup failed across providers. " + "; ".join(errors or ["No provider result"])
         )
 
-    def search_papers(self, query: str, *, limit: int = 5) -> list[PaperSearchResult]:
+    def search_papers(self, query: str, *, limit: int = 5, min_year: int | None = None, max_year: int | None = None) -> list[PaperSearchResult]:
         normalized = query.strip()
         if not normalized:
             raise CitationLookupError("Search query cannot be empty.")
 
         errors: list[str] = []
-        results = self._search_openalex(normalized, limit=limit, errors=errors)
+        results = self._search_openalex(normalized, limit=limit, errors=errors, min_year=min_year, max_year=max_year)
         if results:
             return results
 
-        results = self._search_semantic_scholar(normalized, limit=limit, errors=errors)
+        results = self._search_semantic_scholar(normalized, limit=limit, errors=errors, min_year=min_year, max_year=max_year)
         if results:
             return results
 
@@ -150,19 +150,30 @@ class CitationLookup:
         )
 
     def _search_openalex(
-        self, query: str, *, limit: int, errors: list[str]
+        self, query: str, *, limit: int, errors: list[str], min_year: int | None = None, max_year: int | None = None
     ) -> list[PaperSearchResult]:
         try:
+            params = {
+                "search": query,
+                "per-page": max(1, min(limit, 10)),
+                "select": (
+                    "display_name,publication_year,doi,authorships,primary_location,"
+                    "id,abstract_inverted_index"
+                ),
+            }
+            filters = []
+            if min_year and max_year:
+                filters.append(f"publication_year:{min_year}-{max_year}")
+            elif min_year is not None:
+                filters.append(f"publication_year:>{min_year - 1}")
+            elif max_year is not None:
+                filters.append(f"publication_year:<{max_year + 1}")
+            if filters:
+                params["filter"] = ",".join(filters)
+            
             response = requests.get(
                 "https://api.openalex.org/works",
-                params={
-                    "search": query,
-                    "per-page": max(1, min(limit, 10)),
-                    "select": (
-                        "display_name,publication_year,doi,authorships,primary_location,"
-                        "id,abstract_inverted_index"
-                    ),
-                },
+                params=params,
                 timeout=self.timeout_seconds,
             )
             response.raise_for_status()
@@ -199,16 +210,24 @@ class CitationLookup:
         return papers
 
     def _search_semantic_scholar(
-        self, query: str, *, limit: int, errors: list[str]
+        self, query: str, *, limit: int, errors: list[str], min_year: int | None = None, max_year: int | None = None
     ) -> list[PaperSearchResult]:
         try:
+            params = {
+                "query": query,
+                "limit": max(1, min(limit, 10)),
+                "fields": "title,authors,year,externalIds,venue,url,abstract",
+            }
+            if min_year and max_year:
+                params["year"] = f"{min_year}-{max_year}"
+            elif min_year:
+                params["year"] = f"{min_year}-"
+            elif max_year:
+                params["year"] = f"-{max_year}"
+
             response = requests.get(
                 "https://api.semanticscholar.org/graph/v1/paper/search",
-                params={
-                    "query": query,
-                    "limit": max(1, min(limit, 10)),
-                    "fields": "title,authors,year,externalIds,venue,url,abstract",
-                },
+                params=params,
                 timeout=self.timeout_seconds,
             )
             response.raise_for_status()

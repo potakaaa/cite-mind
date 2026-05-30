@@ -5,6 +5,7 @@ from __future__ import annotations
 from html import escape
 import re
 from typing import Any
+from datetime import datetime, timezone
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -14,6 +15,7 @@ from app.llm import LLMRouter
 from app.llm import LLMProviderError
 from app.orchestrator.task_schema import TaskType
 from app.rag import RAGDisabledError, RAGPipeline
+from app.agents.chat_agent import ChatAgent
 from app.services.document_service import DocumentService, DocumentServiceError
 from app.services.export_service import ExportService, ExportServiceError
 from app.services.research_service import ResearchService, ResearchServiceError
@@ -793,11 +795,15 @@ def _render_chat_tab(
 
         prompt = (
             f"{CHAT_SYSTEM_PROMPT}\n\n"
-            "You have access to AcademicSearch and WebSearch tools. Use them to find papers or articles if the user asks for recent research, news, or general information. "
-            "Do not invent paper titles, authors, quotes, links, or methodologies.\n\n"
+            f"The current date is: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}. "
+            "You have access to AcademicSearch, WebSearch, and ReadUrl tools. Act as an iterative researcher:\n"
+            "- ALWAYS use tools if the user asks for recent research, news, or general information, EVEN IF it is a follow-up question.\n"
+            "- If a search returns irrelevant results or snippets are ambiguous, DO NOT just give up. You MUST try different keywords or use ReadUrl to fetch the full page content.\n"
+            "- Loop through multiple tool calls until you find satisfactory information to answer the user's question.\n"
+            "- Do not invent paper titles, authors, quotes, links, or methodologies.\n\n"
             f"Conversation so far:\n{chr(10).join(history_lines)}\n\n"
             f"Attachment context (may be empty):\n{context_block}\n\n"
-            f"Now answer the latest user message thoroughly and practically."
+            f"Now answer the latest user message thoroughly and practically. Be a proactive researcher!"
         )
 
         _render_chat_agent_activity(activity_placeholder, active="Critic", completed=completed_agents)

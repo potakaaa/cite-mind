@@ -65,16 +65,16 @@ class BaseAgent(ABC):
                     raw_response = response.text
                     break
                     
-                # Append assistant's tool call intent
                 messages.append({
                     "role": "assistant",
                     "content": response.text,
                     "tool_calls": [
                         {
+                            "id": tc.id,
                             "type": "function",
                             "function": {
                                 "name": tc.name,
-                                "arguments": json.dumps(tc.arguments)
+                                "arguments": tc.arguments if provider == "ollama" else json.dumps(tc.arguments)
                             }
                         }
                         for tc in response.tool_calls
@@ -99,6 +99,7 @@ class BaseAgent(ABC):
                     # Append tool result
                     messages.append({
                         "role": "tool",
+                        "tool_call_id": tc.id,
                         "name": tc.name,
                         "content": result_str
                     })

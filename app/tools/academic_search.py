@@ -19,12 +19,20 @@ class AcademicSearchTool(BaseTool):
         "properties": {
             "query": {
                 "type": "string",
-                "description": "The search query (keywords, topics, or exact paper title)."
+                "description": "The search query (keywords, topics, or exact paper title). Avoid putting years directly in the query string."
             },
             "limit": {
                 "type": "integer",
                 "description": "Maximum number of papers to return (default 5).",
                 "default": 5
+            },
+            "min_year": {
+                "type": "integer",
+                "description": "Optional minimum publication year (e.g. 2025)."
+            },
+            "max_year": {
+                "type": "integer",
+                "description": "Optional maximum publication year (e.g. 2026)."
             }
         },
         "required": ["query"]
@@ -39,9 +47,11 @@ class AcademicSearchTool(BaseTool):
             raise ToolExecutionError("AcademicSearch requires a 'query' argument.")
             
         limit = kwargs.get("limit", 5)
+        min_year = kwargs.get("min_year")
+        max_year = kwargs.get("max_year")
         
         try:
-            results = self.lookup.search_papers(query, limit=limit)
-            return [res.model_dump() for res in results]
+            results = self.lookup.search_papers(query, limit=limit, min_year=min_year, max_year=max_year)
+            return [res.to_dict() for res in results]
         except CitationLookupError as exc:
             raise ToolExecutionError(f"Academic search failed: {exc}") from exc
