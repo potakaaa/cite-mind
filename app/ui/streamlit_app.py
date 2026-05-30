@@ -169,6 +169,12 @@ def _configured_providers() -> list[str]:
     return list(LLMRouter().configured_providers())
 
 
+def _call_provider(provider: str | None) -> str | None:
+    if provider and provider != settings.default_llm_provider:
+        return provider
+    return None
+
+
 def _provider_label(provider: str) -> str:
     if provider == settings.default_llm_provider:
         return f"{provider} (default)"
@@ -778,7 +784,7 @@ def _render_pipeline_tab(provider_selection: str | None) -> None:
                 result = _run_workflow(
                     service=service,
                     task_type=task_type,
-                    provider=provider_selection,
+                    provider=_call_provider(provider_selection),
                     raw_text=raw_text_input,
                     pdf_bytes=pdf_bytes,
                     pdf_filename=pdf_filename,
@@ -897,6 +903,49 @@ def _render_chat_tab(
             st.session_state.chat_messages.append({"role": "assistant", "content": search_results_markdown})
             return
 
+        if context_block and len(context_block.strip()) >= ResearchService.MIN_RESEARCH_TEXT_CHARS:
+            try:
+                _render_chat_agent_activity(activity_placeholder, active="Orchestrator", completed=completed_agents)
+                attachment_names = [
+                    _attachment_name(uploaded_file)
+                    for uploaded_file in (uploaded_attachments or [])
+                ]
+                service = ResearchService()
+                result = service.run(
+                    task_type=TaskType.CHAT,
+                    user_prompt=user_message,
+                    raw_text=context_block,
+                    provider=_call_provider(provider_selection),
+                    metadata={
+                        "attachment_count": len(attachment_names),
+                        "attachments": attachment_names,
+                        "chat_history": history_lines[-6:],
+                    },
+                    include_metadata=True,
+                )
+                if isinstance(result, dict):
+                    answer = str(result.get("final_output", "")).strip()
+                    steps = result.get("metadata", {}).get("steps", [])
+                    completed_agents.extend(
+                        step.get("agent", "").replace("_agent", "").title().replace("_", " ")
+                        for step in steps
+                        if isinstance(step, dict) and step.get("status") == "ok"
+                    )
+                else:
+                    answer = str(result).strip()
+                completed_agents.append("Orchestrator")
+                _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents)
+                st.markdown(answer)
+                st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+                return
+            except ResearchServiceError as exc:
+                log_failure(logger, "chat_orchestrated_research", exc, provider=provider_selection)
+                _render_chat_agent_activity(activity_placeholder, active="", completed=completed_agents, failed="Orchestrator")
+                answer = _friendly_error(exc, default="The research workflow could not answer this chat request.")
+                st.error(answer)
+                st.session_state.chat_messages.append({"role": "assistant", "content": answer})
+                return
+
         prompt = (
             f"{CHAT_SYSTEM_PROMPT}\n\n"
             "When scholarly search results are provided, use only those results as found papers. "
@@ -912,7 +961,7 @@ def _render_chat_tab(
         completed_agents.append("Critic")
         _render_chat_agent_activity(activity_placeholder, active="Writer", completed=completed_agents)
         try:
-            answer = llm.generate(prompt=prompt, provider=provider_selection)
+            answer = llm.generate(prompt=prompt, provider=_call_provider(provider_selection))
         except Exception as exc:
             log_failure(logger, "chat_llm", exc, provider=provider_selection)
             if search_results_markdown:
@@ -1030,7 +1079,7 @@ def _render_rag_tab(provider_selection: str | None) -> None:
             with st.spinner("Retrieving relevant chunks and answering..."):
                 st.session_state.rag_answer = pipeline.ask(
                     question,
-                    provider=provider_selection,
+                    provider=_call_provider(provider_selection),
                     top_k=int(top_k),
                 )
         except RAGDisabledError as exc:

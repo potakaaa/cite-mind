@@ -109,6 +109,16 @@ class LLMRouter:
             log_failure(self.logger, "provider_config", exc, provider=selected, task_type=task_type)
             raise LLMProviderError(str(exc)) from exc
         except Exception as exc:
+            if isinstance(exc, LLMProviderError):
+                fallback = self._configured_fallback(exclude={selected})
+                if provider is None and fallback:
+                    self.logger.info(
+                        "Provider '%s' failed at runtime; falling back to '%s': %s",
+                        selected,
+                        fallback,
+                        exc,
+                    )
+                    return self.providers[fallback].generate(prompt, **kwargs)
             log_failure(self.logger, "provider_generation", exc, provider=selected, task_type=task_type)
             if isinstance(exc, LLMProviderError):
                 raise

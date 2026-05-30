@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class TaskType(str, Enum):
     """Supported orchestrator task types for the MVP."""
 
+    CHAT = "chat"
     STUDY_TABLE = "study_table"
     STUDY_TABLE_WITH_GAPS = "study_table_with_gaps"
     PAPER_SUMMARY = "paper_summary"
@@ -22,6 +23,7 @@ class TaskInput(BaseModel):
 
     task_type: TaskType
     paper_text: str = Field(..., min_length=1)
+    user_prompt: str | None = None
     provider: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 

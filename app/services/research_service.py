@@ -36,7 +36,8 @@ class ResearchService:
     def run(
         self,
         *,
-        task_type: TaskType | str,
+        task_type: TaskType | str = TaskType.CHAT,
+        user_prompt: str | None = None,
         raw_text: str | None = None,
         pdf_path: str | Path | None = None,
         pdf_bytes: bytes | None = None,
@@ -78,9 +79,11 @@ class ResearchService:
         payload = TaskInput(
             task_type=normalized_task,
             paper_text=paper_text,
+            user_prompt=user_prompt,
             provider=provider,
             metadata={
                 **(metadata or {}),
+                "user_prompt": user_prompt if user_prompt is not None else (metadata or {}).get("user_prompt"),
                 "source_type": document.get("source_type"),
                 "source_file": document.get("source_file"),
                 "source_path": document.get("source_path"),
