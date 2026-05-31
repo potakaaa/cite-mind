@@ -3,6 +3,7 @@ from app.agents.base_agent import BaseAgent
 from app.tools.academic_search import AcademicSearchTool
 from app.tools.web_search import WebSearchTool
 from app.tools.web_fetch import ReadUrlTool
+from app.tools.deep_crawl import DeepCrawlTool
 from app.tools.knowledge_graph_tools import UpdateGraphTool, QueryGraphTool, MergeNodesTool, DeleteNodeTool, PinNodeTool, UnpinNodeTool
 
 
@@ -10,7 +11,7 @@ class ChatAgent(BaseAgent):
     """An autonomous agent for answering user queries and searching when needed."""
     def __init__(self, **kwargs: Any) -> None:
         tools = [
-            AcademicSearchTool(), WebSearchTool(), ReadUrlTool(), 
+            AcademicSearchTool(), WebSearchTool(), ReadUrlTool(), DeepCrawlTool(),
             UpdateGraphTool(), QueryGraphTool(), 
             MergeNodesTool(), DeleteNodeTool(), PinNodeTool(), UnpinNodeTool()
         ]
