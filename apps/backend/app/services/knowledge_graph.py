@@ -42,12 +42,11 @@ class KnowledgeGraphServiceError(Exception):
 class KnowledgeGraphService:
     """Service for interacting with the SQLite Persistent Knowledge Graph."""
 
-    def __init__(
-        self, 
-        db_path: str = "./data/db/knowledge_graph.db", 
-        embedding_fn: Callable[[str], list[float]] | None = None
-    ):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: str | None = None, embedding_fn: Callable[[str], list[float]] | None = None):
+        if db_path is None:
+            self.db_path = settings.base_dir / "data" / "db" / "knowledge_graph.db"
+        else:
+            self.db_path = Path(db_path)
         self.embedding_fn = embedding_fn
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.setup_db()
