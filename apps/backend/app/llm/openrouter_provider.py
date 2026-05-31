@@ -14,6 +14,10 @@ class OpenRouterProvider(BaseLLMProvider):
     def __init__(self, timeout: int = 45, retries: int = 2) -> None:
         super().__init__(provider_name="openrouter", timeout=timeout, retries=retries)
 
+    def generate_embedding(self, text: str) -> list[float]:
+        """Generate a vector embedding using OpenRouter."""
+        return []
+
     def generate(self, prompt: str, **kwargs: Any) -> LLMResponse:
         settings.validate_provider_config("openrouter")
 

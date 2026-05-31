@@ -41,6 +41,10 @@ class BaseLLMProvider(ABC):
     def generate(self, prompt: str, **kwargs: Any) -> LLMResponse:
         """Generate a response for the given prompt."""
 
+    @abstractmethod
+    def generate_embedding(self, text: str) -> list[float]:
+        """Generate a vector embedding for the given text."""
+
     def _normalize_text(self, text: Any) -> str:
         """Normalize provider responses into a consistent text output."""
         if text is None:

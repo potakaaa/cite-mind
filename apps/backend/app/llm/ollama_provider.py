@@ -20,6 +20,26 @@ class OllamaProvider(BaseLLMProvider):
         retries = retries if retries is not None else settings.ollama_retries
         super().__init__(provider_name="ollama", timeout=timeout, retries=retries)
 
+    def generate_embedding(self, text: str) -> list[float]:
+        """Generate a vector embedding for the given text using Ollama."""
+        # Use nomic-embed-text as default for embeddings unless specified via env
+        model = getattr(settings, "ollama_embedding_model", "nomic-embed-text")
+        base_url = settings.ollama_base_url.rstrip("/")
+        url = f"{base_url}/api/embeddings"
+        
+        payload = {
+            "model": model,
+            "prompt": text,
+        }
+        
+        try:
+            data = self._post_json(url=url, payload=payload)
+            return data.get("embedding", [])
+        except Exception as exc:
+            import logging
+            logging.getLogger("app.llm.ollama").warning(f"Failed to generate embedding: {exc}")
+            return []
+
     def generate(self, prompt: str, **kwargs: Any) -> LLMResponse:
         settings.validate_provider_config("ollama")
 

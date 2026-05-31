@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from typing import Any, Iterable
 
+from config import settings
 from app.orchestrator.task_schema import TaskType
 
 
@@ -42,8 +43,8 @@ class ExportService:
         "pdf": "application/pdf",
     }
 
-    def __init__(self, output_dir: str | Path = "data/outputs") -> None:
-        self.output_dir = Path(output_dir)
+    def __init__(self, output_dir: str | Path | None = None) -> None:
+        self.output_dir = Path(output_dir) if output_dir else settings.output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def export_all(
