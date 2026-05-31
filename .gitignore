@@ -40,3 +40,4 @@ htmlcov/
 !/data/extracted_text/.gitkeep
 
 .jesreal
+data/db/knowledge_graph.db

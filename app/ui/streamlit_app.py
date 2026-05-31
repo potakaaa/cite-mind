@@ -18,6 +18,7 @@ from app.rag import RAGDisabledError, RAGPipeline
 from app.agents.chat_agent import ChatAgent
 from app.services.document_service import DocumentService, DocumentServiceError
 from app.services.export_service import ExportService, ExportServiceError
+from app.services.knowledge_graph import KnowledgeGraphService
 from app.services.research_service import ResearchService, ResearchServiceError
 from app.schemas.study_schema import StudySchema
 from app.utils.logging import (
@@ -42,10 +43,10 @@ TASK_OPTIONS: list[tuple[str, TaskType]] = [
 
 
 CHAT_SYSTEM_PROMPT = (
-    "You are Cite Mind, a practical multi-agent chatbot. Give direct, useful answers in a normal "
-    "conversation. When attachments are provided, use them as context without making the user choose "
-    "a workflow. Be explicit when you are unsure, do not invent sources, and keep the response focused "
-    "on the user's latest message."
+    "You are Cite Mind, a practical multi-agent chatbot. Use available tools to search the web, "
+    "read documents, and maintain a knowledge graph. Give direct, useful answers. "
+    "When attachments are provided, use them as context. Be explicit when you are unsure, "
+    "do not invent sources, and keep the response focused on the user's latest message."
 )
 
 
@@ -793,14 +794,25 @@ def _render_chat_tab(
         if context_block:
             context_block = context_block[:12000]
 
+        kg_service = KnowledgeGraphService()
+        pinned_nodes = kg_service.get_pinned_nodes()
+        core_memory_text = "No pinned nodes."
+        if pinned_nodes:
+            core_memory_text = "\n".join([f"- {n.type}: {n.name} (ID: {n.id})" for n in pinned_nodes])
+
         prompt = (
             f"{CHAT_SYSTEM_PROMPT}\n\n"
             f"The current date is: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}. "
-            "You have access to AcademicSearch, WebSearch, and ReadUrl tools. Act as an iterative researcher:\n"
+            "You have access to AcademicSearch, WebSearch, ReadUrl, UpdateGraph, QueryGraph, MergeNodes, DeleteNode, PinNode, and UnpinNode tools. Act as an iterative researcher:\n"
             "- ALWAYS use tools if the user asks for recent research, news, or general information, EVEN IF it is a follow-up question.\n"
             "- If a search returns irrelevant results or snippets are ambiguous, DO NOT just give up. You MUST try different keywords or use ReadUrl to fetch the full page content.\n"
             "- Loop through multiple tool calls until you find satisfactory information to answer the user's question.\n"
+            "- IMPORTANT: Use UpdateGraph to save any Concepts, Methodologies, or Research Gaps you discover so they are remembered across sessions. You can create standalone nodes (e.g. for user notes) without linking them to a paper.\n"
+            "- IMPORTANT: Use QueryGraph if the user asks about past context, existing gaps, or previously saved knowledge. Leave the query empty to get the most recent nodes.\n"
+            "- MAINTENANCE: Use MergeNodes to consolidate duplicate concepts (e.g., 'ML' and 'Machine Learning'). Use DeleteNode to remove useless nodes.\n"
+            "- MEMORY: The CORE MEMORY block (listed below) contains the user's current active research context, personal project details, and important pinned concepts. ASSUME that anything in CORE MEMORY is directly related to the user's personal work unless stated otherwise. Use PinNode to add things here, and UnpinNode to remove them.\n"
             "- Do not invent paper titles, authors, quotes, links, or methodologies.\n\n"
+            f"=== CORE MEMORY ===\n{core_memory_text}\n===================\n\n"
             f"Conversation so far:\n{chr(10).join(history_lines)}\n\n"
             f"Attachment context (may be empty):\n{context_block}\n\n"
             f"Now answer the latest user message thoroughly and practically. Be a proactive researcher!"

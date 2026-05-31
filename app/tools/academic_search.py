@@ -39,7 +39,9 @@ class AcademicSearchTool(BaseTool):
     }
 
     def __init__(self, timeout_seconds: float = 10.0):
+        from app.services.knowledge_graph import KnowledgeGraphService
         self.lookup = CitationLookup(timeout_seconds=timeout_seconds)
+        self.kg_service = KnowledgeGraphService()
 
     def execute(self, **kwargs: Any) -> Any:
         query = kwargs.get("query")
@@ -52,6 +54,27 @@ class AcademicSearchTool(BaseTool):
         
         try:
             results = self.lookup.search_papers(query, limit=limit, min_year=min_year, max_year=max_year)
+            
+            # Auto-index into Knowledge Graph
+            for res in results:
+                # Upsert Paper
+                paper_id = self.kg_service.upsert_node(
+                    node_type="Paper",
+                    name=res.title,
+                    attributes={"year": res.year, "doi": res.doi, "abstract": res.abstract}
+                )
+                # Upsert Authors and edges
+                for author in res.authors:
+                    author_id = self.kg_service.upsert_node(
+                        node_type="Author",
+                        name=author
+                    )
+                    self.kg_service.upsert_edge(
+                        source_id=author_id,
+                        target_id=paper_id,
+                        relation="AUTHORED"
+                    )
+                    
             return [res.to_dict() for res in results]
         except CitationLookupError as exc:
             raise ToolExecutionError(f"Academic search failed: {exc}") from exc
