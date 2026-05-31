@@ -1,0 +1,11 @@
+{
+  "name": "backend",
+  "private": true,
+  "scripts": {
+    "dev": "../../.venv/bin/python main.py --api",
+    "build": "../../.venv/bin/python -m compileall -q app tests config.py main.py",
+    "lint": "../../.venv/bin/python -m compileall -q app tests config.py main.py",
+    "typecheck": "../../.venv/bin/python -m compileall -q app tests config.py main.py",
+    "test": "../../.venv/bin/python -m pytest -q"
+  }
+}
