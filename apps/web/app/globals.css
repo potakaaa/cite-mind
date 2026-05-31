@@ -148,6 +148,55 @@
   );
 }
 
+.evidence-orbit::before,
+.evidence-orbit::after {
+  position: absolute;
+  content: "";
+  border: 1px solid color-mix(in oklch, var(--primary), transparent 88%);
+  border-radius: 999px;
+}
+
+.evidence-orbit::before {
+  inset: -0.8rem;
+}
+
+.evidence-orbit::after {
+  inset: -1.55rem;
+}
+
+.evidence-orbit > span {
+  animation: evidence-float 4s ease-in-out infinite;
+}
+
+.evidence-orbit > span:nth-of-type(2) {
+  animation-delay: -1.25s;
+}
+
+.evidence-orbit > span:nth-of-type(3) {
+  animation-delay: -2.5s;
+}
+
+@keyframes evidence-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 ::selection {
   background: color-mix(in oklch, var(--primary), transparent 70%);
   color: var(--foreground);
