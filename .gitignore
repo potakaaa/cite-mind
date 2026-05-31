@@ -13,6 +13,10 @@ ENV/
 build/
 dist/
 *.egg-info/
+node_modules/
+.next/
+.pnpm-store/
+.turbo/
 
 # Tool caches
 .pytest_cache/
@@ -32,11 +36,11 @@ htmlcov/
 .idea/
 
 # Project data
-/data/uploads/*
-/data/outputs/*
-/data/extracted_text/*
-!/data/uploads/.gitkeep
-!/data/outputs/.gitkeep
-!/data/extracted_text/.gitkeep
+/apps/backend/data/uploads/*
+/apps/backend/data/outputs/*
+/apps/backend/data/extracted_text/*
+!/apps/backend/data/uploads/.gitkeep
+!/apps/backend/data/outputs/.gitkeep
+!/apps/backend/data/extracted_text/.gitkeep
 
 .jesreal

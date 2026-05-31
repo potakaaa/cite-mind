@@ -1,14 +1,33 @@
-name: Tests
+name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, development]
   pull_request:
+    branches: [main, development]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  pytest:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
 
     steps:
       - name: Check out repository
@@ -17,12 +36,56 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: apps/backend/requirements.txt
 
       - name: Install dependencies
+        working-directory: apps/backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -r requirements.txt
+
+      - name: Validate installed dependencies
+        working-directory: apps/backend
+        run: python -m pip check
+
+      - name: Compile Python sources
+        working-directory: apps/backend
+        run: python -m compileall -q app tests config.py main.py
 
       - name: Run tests
-        run: pytest
+        working-directory: apps/backend
+        run: python -m pytest -q
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint web client
+        run: pnpm turbo run lint --filter=web
+
+      - name: Typecheck web client
+        run: pnpm turbo run typecheck --filter=web
+
+      - name: Build web client
+        run: pnpm turbo run build --filter=web
