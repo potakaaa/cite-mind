@@ -7,12 +7,14 @@ from .text_chunker import TextChunk, TextChunker
 from .base import BaseTool, ToolExecutionError
 from .academic_search import AcademicSearchTool
 from .web_search import WebSearchTool
+from .deep_crawl import DeepCrawlTool
 
 __all__ = [
     "BaseTool",
     "ToolExecutionError",
     "AcademicSearchTool",
     "WebSearchTool",
+    "DeepCrawlTool",
     "FileManager",
     "FileValidationError",
     "CitationLookup",

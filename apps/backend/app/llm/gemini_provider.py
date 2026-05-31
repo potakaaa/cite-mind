@@ -14,6 +14,12 @@ class GeminiProvider(BaseLLMProvider):
     def __init__(self, timeout: int = 45, retries: int = 2) -> None:
         super().__init__(provider_name="gemini", timeout=timeout, retries=retries)
 
+    def generate_embedding(self, text: str) -> list[float]:
+        """Generate a vector embedding using Gemini."""
+        # Optional: implement real Gemini embeddings here if needed.
+        # For now, return empty list or fallback to Ollama if needed.
+        return []
+
     def generate(self, prompt: str, **kwargs: Any) -> LLMResponse:
         settings.validate_provider_config("gemini")
 
