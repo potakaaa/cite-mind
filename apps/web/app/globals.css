@@ -140,6 +140,19 @@
   }
 }
 
+.workspace-shell {
+  background-image: radial-gradient(
+    circle at 72% 6%,
+    color-mix(in oklch, var(--primary), transparent 94%),
+    transparent 30rem
+  );
+}
+
+::selection {
+  background: color-mix(in oklch, var(--primary), transparent 70%);
+  color: var(--foreground);
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -150,7 +163,7 @@
 }
 
 .research-prose {
-  @apply text-sm leading-7 text-foreground;
+  @apply text-[15px] leading-7 text-foreground;
 }
 
 .research-prose h1,

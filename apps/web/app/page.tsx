@@ -86,14 +86,27 @@ const navItems: { id: Section; label: string; icon: typeof RiBookOpenLine }[] =
   ]
 
 const starterPrompts = [
-  ["Summarize a paper", "Extract the argument, evidence, and limitations."],
-  ["Compare sources", "Find where two papers agree and diverge."],
-  ["Build a literature review", "Organize themes and identify research gaps."],
-]
-
-const libraryFiles = [
-  ["neural_nets_v2.pdf", "PDF · 14 pages"],
-  ["draft_thesis_intro.docx", "Document · edited today"],
+  {
+    title: "Summarize a paper",
+    description: "Extract the argument, evidence, and limitations.",
+    meta: "Single source",
+    prompt: "Summarize this paper: ",
+    icon: RiFileTextLine,
+  },
+  {
+    title: "Compare sources",
+    description: "Find where two papers agree and diverge.",
+    meta: "Source synthesis",
+    prompt: "Compare these sources: ",
+    icon: RiEqualizerLine,
+  },
+  {
+    title: "Build a literature review",
+    description: "Organize themes and identify research gaps.",
+    meta: "Deep research",
+    prompt: "Build a literature review about: ",
+    icon: RiBookOpenLine,
+  },
 ]
 
 function createConversation(): Conversation {
@@ -259,7 +272,7 @@ export default function Page() {
   }
 
   return (
-    <div className="flex h-svh overflow-hidden bg-background text-foreground">
+    <div className="workspace-shell flex h-svh overflow-hidden bg-background text-foreground">
       <aside className="hidden w-[272px] shrink-0 border-r border-sidebar-border bg-sidebar md:flex">
         <Sidebar
           conversations={conversations}
@@ -274,8 +287,8 @@ export default function Page() {
         />
       </aside>
 
-      <main className="relative flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b bg-background/85 px-4 backdrop-blur-xl md:px-7">
+      <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex h-[68px] shrink-0 items-center justify-between border-b bg-background/80 px-4 backdrop-blur-xl md:px-7">
           <div className="flex min-w-0 items-center gap-3">
             <Sheet>
               <SheetTrigger asChild>
@@ -302,20 +315,13 @@ export default function Page() {
               <p className="text-[10px] font-semibold tracking-[0.2em] text-muted-foreground uppercase">
                 {section === "chat" ? "Research workspace" : "Workspace"}
               </p>
-              <h1 className="truncate text-base font-semibold tracking-tight md:text-lg">
+              <h1 className="truncate text-lg font-bold tracking-tight md:text-xl">
                 {section === "chat"
                   ? (active?.title ?? "Untitled research")
                   : sectionLabel(section)}
               </h1>
             </div>
           </div>
-          <Badge
-            variant="outline"
-            className="gap-2 rounded-full bg-card px-2.5 py-1 text-[10px] tracking-[0.14em] text-muted-foreground uppercase"
-          >
-            <span className="size-1.5 rounded-full bg-success shadow-[0_0_0_3px_var(--success-soft)]" />
-            <span className="hidden sm:inline">Systems online</span>
-          </Badge>
         </header>
 
         {section === "chat" ? (
@@ -362,9 +368,7 @@ function Sidebar({
         <div className="mb-6 flex items-center gap-2.5 px-1 pt-1">
           <Logo />
           <div>
-            <div className="text-sm font-semibold tracking-tight">
-              Cite Mind
-            </div>
+            <div className="text-base font-bold tracking-tight">Cite Mind</div>
             <div className="text-[10px] font-medium tracking-[0.18em] text-muted-foreground uppercase">
               Research copilot
             </div>
@@ -372,12 +376,12 @@ function Sidebar({
         </div>
         <Button
           onClick={onNewChat}
-          className="h-10 w-full justify-start gap-2 rounded-lg px-3 text-sm shadow-sm"
+          className="h-11 w-full justify-start gap-2 rounded-lg px-3 text-[15px] font-semibold shadow-sm"
         >
           <RiAddLine /> Start new research
         </Button>
       </div>
-      <ScrollArea className="flex-1 px-3">
+      <ScrollArea className="min-h-0 flex-1 px-3">
         <div className="space-y-6 pb-4">
           <div className="space-y-0.5">
             {navItems.slice(1).map((item) => (
@@ -398,7 +402,7 @@ function Sidebar({
                   key={conversation.id}
                   onClick={() => onOpenChat(conversation.id)}
                   className={cn(
-                    "flex w-full items-center gap-2.5 truncate rounded-md px-2.5 py-2 text-left text-xs text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                    "flex w-full items-center gap-2.5 truncate rounded-md px-2.5 py-2 text-left text-[13px] font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                     activeId === conversation.id &&
                       section === "chat" &&
                       "bg-sidebar-accent text-sidebar-accent-foreground"
@@ -409,16 +413,6 @@ function Sidebar({
                 </button>
               ))}
             </div>
-          </div>
-          <div>
-            <SidebarLabel>Library</SidebarLabel>
-            {libraryFiles.map(([label]) => (
-              <SidebarFile
-                key={label}
-                icon={label.endsWith(".pdf") ? RiFilePdfLine : RiFileTextLine}
-                label={label}
-              />
-            ))}
           </div>
         </div>
       </ScrollArea>
@@ -469,8 +463,8 @@ function ChatPanel({
 }) {
   return (
     <>
-      <ScrollArea className="flex-1">
-        <div className="mx-auto w-full max-w-[860px] space-y-8 px-4 py-8 pb-48 md:px-6 md:py-10">
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="mx-auto w-full max-w-[860px] space-y-8 px-4 py-8 md:px-6 md:py-10">
           {!active?.messages.length && <Welcome onSelect={onMessage} />}
           {active?.messages.map((item) =>
             item.role === "user" ? (
@@ -511,44 +505,59 @@ function ChatPanel({
 
 function Welcome({ onSelect }: { onSelect: (prompt: string) => void }) {
   return (
-    <section className="pt-5 md:pt-14">
-      <div className="max-w-xl">
+    <section className="relative pt-3 md:pt-10">
+      <div className="pointer-events-none absolute -top-24 right-0 h-72 w-72 rounded-full bg-primary/8 blur-3xl" />
+      <div className="relative max-w-2xl">
         <Badge
           variant="secondary"
-          className="mb-5 h-6 gap-1.5 px-2.5 text-[10px] tracking-[0.15em] text-primary uppercase"
+          className="mb-5 h-7 gap-1.5 rounded-full border border-primary/10 bg-primary/8 px-3 text-[10px] tracking-[0.16em] text-primary uppercase shadow-xs"
         >
           <RiSparkling2Line className="size-3" /> Academic research assistant
         </Badge>
-        <h2 className="text-3xl font-semibold tracking-[-0.045em] md:text-5xl">
-          Turn your sources into{" "}
-          <span className="text-primary">clear thinking.</span>
+        <h2 className="max-w-2xl text-[2.9rem] leading-[0.96] font-bold tracking-[-0.07em] md:text-[5rem]">
+          Research with
+          <span className="block bg-gradient-to-r from-primary to-primary/65 bg-clip-text text-transparent">
+            a clearer mind.
+          </span>
         </h2>
-        <p className="mt-4 max-w-lg text-sm leading-6 text-muted-foreground md:text-base">
-          Ask a research question, attach a paper, or start with one of these
-          workflows.
+        <p className="mt-5 max-w-2xl text-base leading-7 font-medium text-muted-foreground md:text-lg md:leading-8">
+          Bring your sources together, surface the strongest evidence, and turn
+          complex material into work you can trust.
         </p>
       </div>
-      <div className="mt-9 grid gap-3 md:grid-cols-3">
-        {starterPrompts.map(([title, description]) => (
-          <button
-            key={title}
-            onClick={() => onSelect(`${title}: `)}
-            className="group rounded-xl border bg-card p-4 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md"
-          >
-            <div className="mb-7 flex size-8 items-center justify-center rounded-lg bg-primary/8 text-primary">
-              <RiArrowRightLine className="size-4 transition-transform group-hover:translate-x-0.5" />
-            </div>
-            <h3 className="text-sm font-semibold">{title}</h3>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              {description}
-            </p>
-          </button>
-        ))}
+      <div className="mt-9 flex items-center gap-3">
+        <span className="text-[10px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
+          Start a workflow
+        </span>
+        <Separator className="flex-1" />
       </div>
-      <div className="mt-6 flex flex-wrap gap-x-5 gap-y-2 border-t pt-4 text-[11px] font-medium tracking-[0.12em] text-muted-foreground uppercase">
-        <span>Upload papers</span>
-        <span>Citation-aware answers</span>
-        <span>Private workspace</span>
+      <div className="mt-3 grid gap-3 md:grid-cols-3">
+        {starterPrompts.map(
+          ({ title, description, meta, prompt, icon: Icon }, index) => (
+            <button
+              key={title}
+              onClick={() => onSelect(prompt)}
+              className={cn(
+                "group relative overflow-hidden rounded-2xl border bg-card/80 p-4 text-left shadow-xs transition-all hover:-translate-y-1 hover:border-primary/35 hover:shadow-lg",
+                index === 0 && "md:col-span-1"
+              )}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex size-9 items-center justify-center rounded-xl border border-primary/10 bg-primary/8 text-primary">
+                  <Icon className="size-4" />
+                </div>
+                <RiArrowRightLine className="mt-2 size-4 text-muted-foreground transition-all group-hover:translate-x-1 group-hover:text-primary" />
+              </div>
+              <p className="mt-8 text-[10px] font-semibold tracking-[0.15em] text-primary uppercase">
+                {meta}
+              </p>
+              <h3 className="mt-2 text-base font-bold">{title}</h3>
+              <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                {description}
+              </p>
+            </button>
+          )
+        )}
       </div>
     </section>
   )
@@ -557,7 +566,7 @@ function Welcome({ onSelect }: { onSelect: (prompt: string) => void }) {
 function UserMessage({ item }: { item: Message }) {
   return (
     <div className="flex flex-col items-end gap-2">
-      <div className="max-w-[88%] rounded-2xl rounded-br-md bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground shadow-sm">
+      <div className="max-w-[88%] rounded-2xl rounded-br-md bg-primary px-4 py-3 text-[15px] leading-6 font-medium text-primary-foreground shadow-sm">
         <p>{item.content}</p>
       </div>
       {item.attachments?.map((attachment) => (
@@ -579,7 +588,7 @@ function AssistantMessage({ item }: { item: Message }) {
         </Avatar>
         <div className="min-w-0 flex-1">
           <div className="mb-2 flex items-center gap-2">
-            <span className="text-sm font-semibold">Cite Mind</span>
+            <span className="text-base font-bold">Cite Mind</span>
             <Badge
               variant="secondary"
               className="text-[9px] tracking-wider text-muted-foreground uppercase"
@@ -671,7 +680,7 @@ function Composer({
   onSend: () => void
 }) {
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pt-12 pb-4 md:px-6 md:pb-6">
+    <div className="pointer-events-none shrink-0 bg-gradient-to-t from-background via-background/95 to-transparent px-4 pt-4 pb-4 md:px-6 md:pt-5 md:pb-6">
       <div className="pointer-events-auto mx-auto max-w-[860px]">
         {files.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
@@ -684,7 +693,7 @@ function Composer({
             ))}
           </div>
         )}
-        <div className="rounded-2xl border bg-card p-2 shadow-[0_12px_40px_-18px_color-mix(in_oklch,var(--foreground),transparent_70%)]">
+        <div className="rounded-[1.35rem] border bg-card/95 p-2 shadow-[0_18px_55px_-20px_color-mix(in_oklch,var(--foreground),transparent_65%)] backdrop-blur-xl">
           <Textarea
             value={message}
             onChange={(event) => onMessage(event.target.value)}
@@ -695,7 +704,7 @@ function Composer({
               }
             }}
             placeholder="Ask a research question..."
-            className="min-h-14 resize-none border-0 bg-transparent px-2.5 py-2 text-sm leading-6 shadow-none focus-visible:ring-0 md:text-sm"
+            className="min-h-16 resize-none border-0 bg-transparent px-2.5 py-2 text-base leading-7 font-medium shadow-none focus-visible:ring-0"
           />
           <div className="flex items-center justify-between gap-2 border-t px-0.5 pt-2">
             <div className="flex min-w-0 items-center gap-1">
@@ -718,6 +727,10 @@ function Composer({
               >
                 <RiAttachment2 />
               </Button>
+              <span className="hidden text-[10px] font-medium tracking-wide text-muted-foreground sm:inline">
+                Add sources
+              </span>
+              <Separator orientation="vertical" className="mx-1 h-4" />
               <Select value={provider} onValueChange={onProvider}>
                 <SelectTrigger className="max-w-[150px] border-0 bg-transparent px-1.5 text-[11px] text-muted-foreground shadow-none">
                   <RiEqualizerLine />
@@ -736,7 +749,7 @@ function Composer({
               size="icon-lg"
               disabled={pending || !message.trim()}
               onClick={onSend}
-              className="rounded-xl shadow-sm"
+              className="rounded-xl shadow-sm transition-transform hover:scale-105"
             >
               <RiSendPlane2Line />
             </Button>
@@ -771,7 +784,7 @@ function Placeholder({
     history: [
       "History",
       "Pick up where you left off",
-      `${conversations.length} browser-local conversation${conversations.length === 1 ? "" : "s"} saved in this workspace.`,
+      `${conversations.length} conversation${conversations.length === 1 ? "" : "s"} in this workspace.`,
     ],
     settings: [
       "Settings",
@@ -781,11 +794,11 @@ function Placeholder({
     account: [
       "Account",
       "Your local profile",
-      "Account sync is not enabled in this local-first version.",
+      "Manage your profile and workspace preferences.",
     ],
   }[section]
   return (
-    <ScrollArea className="flex-1">
+    <ScrollArea className="min-h-0 flex-1">
       <div className="mx-auto w-full max-w-5xl px-5 py-8 md:px-8 md:py-12">
         <div className="max-w-xl">
           <p className="text-[10px] font-semibold tracking-[0.2em] text-primary uppercase">
@@ -798,96 +811,21 @@ function Placeholder({
             {content[2]}
           </p>
         </div>
-        <div className="mt-9 grid gap-3 md:grid-cols-3">
-          <StatCard
-            label="Saved sources"
-            value={section === "library" ? "02" : "—"}
-            detail="Local workspace"
-          />
-          <StatCard
-            label="Research threads"
-            value={String(conversations.length).padStart(2, "0")}
-            detail="Browser-local"
-          />
-          <StatCard
-            label="Workspace mode"
-            value="Local"
-            detail="Private by default"
-          />
-        </div>
         <Card className="mt-7 gap-0 py-0 shadow-xs">
           <CardContent className="p-0">
-            {section === "library" ? (
-              libraryFiles.map(([name, meta], index) => (
-                <div
-                  key={name}
-                  className={cn(
-                    "flex items-center gap-3 px-4 py-4",
-                    index > 0 && "border-t"
-                  )}
-                >
-                  <div className="flex size-9 items-center justify-center rounded-lg bg-muted text-primary">
-                    {name.endsWith(".pdf") ? (
-                      <RiFilePdfLine className="size-4" />
-                    ) : (
-                      <RiFileTextLine className="size-4" />
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{name}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {meta}
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Open ${name}`}
-                  >
-                    <RiArrowRightLine />
-                  </Button>
-                </div>
-              ))
-            ) : (
-              <div className="flex flex-col items-center px-6 py-14 text-center">
-                <div className="flex size-12 items-center justify-center rounded-xl bg-muted text-primary">
-                  <RiSparkling2Line className="size-5" />
-                </div>
-                <h3 className="mt-4 text-sm font-semibold">
-                  This space is ready for your work
-                </h3>
-                <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
-                  The foundation is in place. Start a research conversation to
-                  add activity.
-                </p>
+            <div className="flex flex-col items-center px-6 py-14 text-center">
+              <div className="flex size-12 items-center justify-center rounded-xl bg-muted text-primary">
+                <RiSparkling2Line className="size-5" />
               </div>
-            )}
+              <h3 className="mt-4 text-sm font-semibold">Nothing here yet</h3>
+              <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+                Your workspace activity will appear here when it is available.
+              </p>
+            </div>
           </CardContent>
         </Card>
       </div>
     </ScrollArea>
-  )
-}
-
-function StatCard({
-  label,
-  value,
-  detail,
-}: {
-  label: string
-  value: string
-  detail: string
-}) {
-  return (
-    <Card className="gap-1 py-4 shadow-xs">
-      <CardContent>
-        <p className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-          {label}
-        </p>
-        <p className="mt-3 text-2xl font-semibold tracking-tight">{value}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
-      </CardContent>
-    </Card>
   )
 }
 
@@ -935,21 +873,6 @@ function SidebarLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-function SidebarFile({
-  icon: Icon,
-  label,
-}: {
-  icon: typeof RiFilePdfLine
-  label: string
-}) {
-  return (
-    <div className="flex items-center gap-2.5 px-2.5 py-1.5 text-xs text-sidebar-foreground/65">
-      <Icon className="size-3.5 shrink-0" />
-      <span className="truncate">{label}</span>
-    </div>
-  )
-}
-
 function SidebarNavButton({
   icon: Icon,
   label,
@@ -965,7 +888,7 @@ function SidebarNavButton({
     <button
       onClick={onClick}
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-xs font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+        "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] font-semibold text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
         active && "bg-sidebar-accent text-sidebar-accent-foreground"
       )}
     >
