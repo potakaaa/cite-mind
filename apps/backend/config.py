@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 import os
 
 
+BACKEND_DIR = Path(__file__).resolve().parent
+load_dotenv(BACKEND_DIR / ".env")
 load_dotenv()
 
 
@@ -46,15 +48,15 @@ class Settings(BaseModel):
     )
 
     # Paths
-    base_dir: Path = Field(default=Path(__file__).resolve().parent)
+    base_dir: Path = Field(default=BACKEND_DIR)
     upload_dir: Path = Field(
-        default=Path(os.getenv("UPLOAD_DIR", str(Path(__file__).resolve().parent / "data" / "uploads")))
+        default=Path(os.getenv("UPLOAD_DIR", str(BACKEND_DIR / "data" / "uploads")))
     )
     output_dir: Path = Field(
-        default=Path(os.getenv("OUTPUT_DIR", str(Path(__file__).resolve().parent / "data" / "outputs")))
+        default=Path(os.getenv("OUTPUT_DIR", str(BACKEND_DIR / "data" / "outputs")))
     )
     vector_db_dir: Path = Field(
-        default=Path(os.getenv("VECTOR_DB_DIR", str(Path(__file__).resolve().parent / "data" / "vector_db")))
+        default=Path(os.getenv("VECTOR_DB_DIR", str(BACKEND_DIR / "data" / "vector_db")))
     )
 
     # Optional RAG layer

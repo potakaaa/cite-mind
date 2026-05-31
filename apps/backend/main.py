@@ -2,7 +2,7 @@
 
 Usage:
     python main.py            # prints environment summary
-    python main.py --ui       # launches Streamlit UI
+    python main.py --api      # launches FastAPI
 """
 
 from __future__ import annotations
@@ -38,18 +38,16 @@ def _run_smoke_test_if_configured() -> None:
         print(f"\n[LLM Smoke Test] Provider error: {exc}")
 
 
-def _launch_streamlit() -> None:
-    from streamlit.web import cli as stcli
+def _launch_api() -> None:
+    import uvicorn
 
-    app_path = os.path.join(os.path.dirname(__file__), "app", "ui", "streamlit_app.py")
-    sys.argv = ["streamlit", "run", app_path]
-    raise SystemExit(stcli.main())
+    uvicorn.run("app.api.main:app", host="0.0.0.0", port=8000, reload=True)
 
 
 def main() -> None:
     configure_logging()
-    if "--ui" in sys.argv:
-        _launch_streamlit()
+    if "--api" in sys.argv:
+        _launch_api()
         return
 
     _print_environment()
