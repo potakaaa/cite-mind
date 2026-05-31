@@ -19,12 +19,21 @@ LlmProvider = Literal["gemini", "ollama", "openrouter"]
 AppEnv = Literal["development", "staging", "production"]
 
 
+def _csv_env(name: str, default: str) -> list[str]:
+    return [value.strip() for value in os.getenv(name, default).split(",") if value.strip()]
+
+
 class Settings(BaseModel):
     # App
     app_name: str = Field(default=os.getenv("APP_NAME", "Cite Mind"))
     app_env: AppEnv = Field(default=os.getenv("APP_ENV", "development"))
     log_level: str = Field(default=os.getenv("LOG_LEVEL", "INFO"))
     max_agents: int = Field(default=int(os.getenv("MAX_AGENTS", "3")), ge=1, le=3)
+    cors_allow_origins: list[str] = Field(
+        default_factory=lambda: _csv_env(
+            "CORS_ALLOW_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+        )
+    )
 
     # Provider routing
     default_llm_provider: LlmProvider = Field(

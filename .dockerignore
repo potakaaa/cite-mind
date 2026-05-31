@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+**/__pycache__
+**/*.py[cod]
+**/.next
+**/.pytest_cache
+**/node_modules
+**/.turbo
+apps/backend/data/extracted_text/*
+apps/backend/data/outputs/*
+apps/backend/data/uploads/*

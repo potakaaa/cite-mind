@@ -9,6 +9,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from config import settings
 from app.services.chat_service import ChatAttachment, ChatService, ChatServiceError
 
 
@@ -32,7 +33,7 @@ class ProvidersResponse(BaseModel):
 app = FastAPI(title="Cite Mind API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=settings.cors_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

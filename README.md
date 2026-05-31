@@ -57,3 +57,17 @@ pnpm build
 ```
 
 See [docs/setup.md](docs/setup.md), [docs/architecture.md](docs/architecture.md), and [docs/usage.md](docs/usage.md) for details.
+
+## Delivery
+
+GitHub Actions validates the backend and web client on pull requests and pushes. Pushes to `main`
+and tags such as `v1.0.0` publish deployable images to GitHub Container Registry:
+
+```text
+ghcr.io/<owner>/<repository>-backend
+ghcr.io/<owner>/<repository>-web
+```
+
+Set the repository Actions variable `NEXT_PUBLIC_API_BASE_URL` to the public backend URL before
+publishing the web image. Configure `CORS_ALLOW_ORIGINS` on the backend container with the public
+web origin. Provider credentials remain runtime secrets and must not be added to the workflow.
