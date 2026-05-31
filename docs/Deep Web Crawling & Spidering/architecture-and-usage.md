@@ -59,6 +59,14 @@ To prevent runaway processes or memory leaks, the spider enforces multiple rigid
 - **Content Truncation:** If a specific webpage is overly bloated, its content is safely truncated at 8,000 characters before embedding to preserve the integrity of the Vector database.
 - **Visited Sets:** The spider tracks all visited URLs in a set to ensure it never processes the same link twice or falls into a circular loop (e.g., Page A links to Page B, which links back to Page A).
 
+## 🧠 Agent Memory UX
+
+To ensure the AI agent can seamlessly converse with the user about the topic it just crawled without needing to blindly search the Graph or re-read the page, `DeepCrawlTool` provides the **best of both worlds** in its return structure:
+- It returns the **text of the main starting URL** directly to the AI's short-term context window.
+- It quietly backgrounds the massive text of all the child links directly into the database. 
+
+This guarantees the AI has the immediate context to summarize the parent page right away, while simultaneously building the massive Knowledge Graph in the background!
+
 ## 🚀 Usage
 
 The agent determines when to use this tool based on its orchestration prompt. However, users can actively trigger it by instructing the AI:
