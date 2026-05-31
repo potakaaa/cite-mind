@@ -39,7 +39,12 @@ class UpdateGraphTool(BaseTool):
 
     def __init__(self):
         from app.services.knowledge_graph import KnowledgeGraphService
-        self.kg_service = KnowledgeGraphService()
+        from app.llm.llm_router import LLMRouter
+        
+        self.router = LLMRouter()
+        self.kg_service = KnowledgeGraphService(
+            embedding_fn=self.router.generate_embedding
+        )
 
     def execute(self, **kwargs: Any) -> Any:
         node_type = kwargs.get("node_type")
@@ -108,7 +113,12 @@ class QueryGraphTool(BaseTool):
 
     def __init__(self):
         from app.services.knowledge_graph import KnowledgeGraphService
-        self.kg_service = KnowledgeGraphService()
+        from app.llm.llm_router import LLMRouter
+        
+        self.router = LLMRouter()
+        self.kg_service = KnowledgeGraphService(
+            embedding_fn=self.router.generate_embedding
+        )
 
     def execute(self, **kwargs: Any) -> Any:
         query = kwargs.get("query")
@@ -118,11 +128,11 @@ class QueryGraphTool(BaseTool):
             
         try:
             if not query:
-                nodes = self.kg_service.get_recent_nodes(limit=5)
+                nodes = self.kg_service.get_recent_nodes(limit=limit)
                 if not nodes:
                     return "The knowledge graph is currently empty."
             else:
-                nodes = self.kg_service.search_nodes(query, limit=5)
+                nodes = self.kg_service.search_nodes_semantic(query, limit=limit)
                 if not nodes:
                     return f"No nodes found matching '{query}'."
                 

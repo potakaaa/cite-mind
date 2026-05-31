@@ -1,10 +1,21 @@
 import sqlite3
 import json
-from typing import Any
+from typing import Any, Callable
 from pathlib import Path
 from dataclasses import dataclass, asdict
+import math
 
 from config import settings
+
+def cosine_similarity(v1: list[float], v2: list[float]) -> float:
+    if not v1 or not v2 or len(v1) != len(v2):
+        return 0.0
+    dot = sum(a * b for a, b in zip(v1, v2))
+    norm1 = sum(a * a for a in v1) ** 0.5
+    norm2 = sum(b * b for b in v2) ** 0.5
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return dot / (norm1 * norm2)
 
 
 @dataclass
@@ -31,8 +42,13 @@ class KnowledgeGraphServiceError(Exception):
 class KnowledgeGraphService:
     """Service for interacting with the SQLite Persistent Knowledge Graph."""
 
-    def __init__(self, db_path: str = "./data/db/knowledge_graph.db"):
+    def __init__(
+        self, 
+        db_path: str = "./data/db/knowledge_graph.db", 
+        embedding_fn: Callable[[str], list[float]] | None = None
+    ):
         self.db_path = Path(db_path)
+        self.embedding_fn = embedding_fn
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.setup_db()
 
@@ -57,6 +73,12 @@ class KnowledgeGraphService:
             # Handle migration if is_pinned is missing
             try:
                 conn.execute("ALTER TABLE nodes ADD COLUMN is_pinned BOOLEAN DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass # Column already exists
+                
+            # Handle migration for embeddings
+            try:
+                conn.execute("ALTER TABLE nodes ADD COLUMN embedding TEXT")
             except sqlite3.OperationalError:
                 pass # Column already exists
                 
@@ -90,17 +112,34 @@ class KnowledgeGraphService:
             if row:
                 node_id = row['id']
                 existing_attrs = json.loads(row['attributes'] or "{}")
-                # Merge attributes (new overwrites old)
                 existing_attrs.update(attributes)
-                cursor.execute(
-                    "UPDATE nodes SET attributes = ? WHERE id = ?",
-                    (json.dumps(existing_attrs), node_id)
-                )
+                
+                # Check if we need to update embedding
+                embed_val = row.get('embedding') if 'embedding' in row.keys() else None
+                if not embed_val and self.embedding_fn:
+                    embed_vector = self.embedding_fn(f"{node_type} {name} {json.dumps(existing_attrs)}")
+                    embed_val = json.dumps(embed_vector)
+                    
+                if embed_val:
+                    cursor.execute(
+                        "UPDATE nodes SET attributes = ?, embedding = ? WHERE id = ?",
+                        (json.dumps(existing_attrs), embed_val, node_id)
+                    )
+                else:
+                    cursor.execute(
+                        "UPDATE nodes SET attributes = ? WHERE id = ?",
+                        (json.dumps(existing_attrs), node_id)
+                    )
                 return node_id
             else:
+                embed_val = None
+                if self.embedding_fn:
+                    embed_vector = self.embedding_fn(f"{node_type} {name} {attr_json}")
+                    embed_val = json.dumps(embed_vector)
+                    
                 cursor.execute(
-                    "INSERT INTO nodes (type, name, attributes) VALUES (?, ?, ?)",
-                    (node_type, name, attr_json)
+                    "INSERT INTO nodes (type, name, attributes, embedding) VALUES (?, ?, ?, ?)",
+                    (node_type, name, attr_json, embed_val)
                 )
                 return cursor.lastrowid
 
@@ -149,6 +188,42 @@ class KnowledgeGraphService:
                     attributes=json.loads(row['attributes'] or "{}")
                 )
                 for row in cursor.fetchall()
+            ]
+
+    def search_nodes_semantic(self, query: str, limit: int = 5) -> list[GraphNode]:
+        """Search for nodes using Cosine Similarity on vectors."""
+        if not self.embedding_fn:
+            # Fallback to simple text search if no embedding function is provided
+            return self.search_nodes(query, limit)
+            
+        query_vector = self.embedding_fn(query)
+        if not query_vector:
+            return self.search_nodes(query, limit)
+            
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM nodes WHERE embedding IS NOT NULL")
+            rows = cursor.fetchall()
+            
+            scored_nodes = []
+            for row in rows:
+                try:
+                    node_vec = json.loads(row['embedding'])
+                    score = cosine_similarity(query_vector, node_vec)
+                    scored_nodes.append((score, row))
+                except (ValueError, TypeError):
+                    continue
+                    
+            scored_nodes.sort(key=lambda x: x[0], reverse=True)
+            
+            return [
+                GraphNode(
+                    id=r['id'],
+                    type=r['type'],
+                    name=r['name'],
+                    attributes=json.loads(r['attributes'] or "{}")
+                )
+                for score, r in scored_nodes[:limit]
             ]
 
     def get_node_by_name(self, node_type: str, name: str) -> GraphNode | None:

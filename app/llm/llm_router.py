@@ -115,3 +115,17 @@ class LLMRouter:
             raise LLMProviderError(
                 f"Failed to generate response using '{selected}' provider: {exc}"
             ) from exc
+
+    def generate_embedding(
+        self,
+        text: str,
+        provider: LlmProvider | None = None,
+    ) -> list[float]:
+        selected = self._select_provider(provider=provider)
+        llm = self.providers[selected]
+        
+        try:
+            return llm.generate_embedding(text)
+        except Exception as exc:
+            log_failure(self.logger, "provider_embedding", exc, provider=selected)
+            return []
