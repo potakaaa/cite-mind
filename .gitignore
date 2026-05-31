@@ -44,3 +44,4 @@ htmlcov/
 !/apps/backend/data/extracted_text/.gitkeep
 
 .jesreal
+apps/backend/data/db/knowledge_graph.db
