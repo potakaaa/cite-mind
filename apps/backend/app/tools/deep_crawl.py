@@ -103,6 +103,7 @@ class DeepCrawlTool(BaseTool):
         queue = [(start_url, 0, None)]  # (url, depth, parent_url)
         nodes_injected = 0
         edges_injected = 0
+        starting_page_content = None
 
         while queue and len(visited) < max_pages:
             current_url, depth, parent_url = queue.pop(0)
@@ -114,6 +115,10 @@ class DeepCrawlTool(BaseTool):
             
             try:
                 title, content, links = self._fetch_and_parse(current_url)
+                
+                # Capture the parent page text for the AI's immediate context window
+                if depth == 0 and not starting_page_content:
+                    starting_page_content = content[:4000] + "\n...(Truncated for LLM Context Window)" if len(content) > 4000 else content
                 
                 # Upsert into Knowledge Graph
                 # This will automatically trigger embedding_fn because of __init__ setup
@@ -147,8 +152,9 @@ class DeepCrawlTool(BaseTool):
 
         return {
             "status": "success",
-            "message": f"Successfully crawled {len(visited)} pages.",
+            "message": f"Successfully crawled {len(visited)} pages. The starting page text is provided below. All other pages were safely mapped into the Knowledge Graph in the background.",
             "nodes_injected": nodes_injected,
             "edges_injected": edges_injected,
-            "starting_url": start_url
+            "starting_url": start_url,
+            "starting_page_text": starting_page_content or "No content extracted."
         }
